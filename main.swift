@@ -8,8 +8,8 @@ enum Session: String {
 }
 
 struct Quote {
-    let price: Double          // последняя сделка, включая pre/post
-    let changePercent: Double  // от базы текущей сессии
+    let price: Double          // last trade, extended hours included
+    let changePercent: Double  // against the current session's base
     let change: Double
     let session: Session
     let regularPrice: Double
@@ -23,6 +23,13 @@ struct Quote {
     let tickTime: Date
 }
 
+struct NewsItem {
+    let title: String
+    let publisher: String
+    let link: String
+    let published: Date
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     var timer: Timer?
@@ -32,6 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let rangeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let updatedItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var inFlight = false
+    var newsTimer: Timer?
+    let newsHeader = NSMenuItem(title: "Новости", action: nil, keyEquivalent: "")
+    var newsItems: [NSMenuItem] = []
+    let newsCount = 3
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         item.button?.title = "\(symbol) …"
@@ -44,6 +55,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         [priceItem, sessionItem, regularItem, rangeItem, updatedItem].forEach {
             $0.isEnabled = true
             menu.addItem($0)
+        }
+        menu.addItem(.separator())
+        newsHeader.isEnabled = true
+        newsHeader.attributedTitle = styled("Новости", size: 11, weight: .semibold, color: .secondaryLabelColor)
+        menu.addItem(newsHeader)
+        for _ in 0..<newsCount {
+            let entry = NSMenuItem(title: "", action: #selector(openNews(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.isEnabled = true
+            entry.isHidden = true
+            newsItems.append(entry)
+            menu.addItem(entry)
         }
         menu.addItem(.separator())
         let refreshItem = NSMenuItem(title: "Обновить сейчас", action: #selector(refresh), keyEquivalent: "r")
@@ -63,10 +86,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.refresh()
         }
         timer?.tolerance = refreshInterval / 5
+
+        // News changes rarely, so it gets its own 5-minute timer instead of hammering the endpoint.
+        refreshNews()
+        newsTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            self?.refreshNews()
+        }
+        newsTimer?.tolerance = 30
     }
 
     @objc func openWeb() {
         NSWorkspace.shared.open(URL(string: "https://finance.yahoo.com/quote/\(symbol)")!)
+    }
+
+    @objc func openNews(_ sender: NSMenuItem) {
+        if let link = sender.representedObject as? String, let url = URL(string: link) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func refreshNews() {
+        let url = URL(string: "https://query1.finance.yahoo.com/v1/finance/search?q=\(symbol)&newsCount=\(newsCount)&quotesCount=0")!
+        var req = URLRequest(url: url)
+        req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 10
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            guard
+                let data = data,
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let raw = json["news"] as? [[String: Any]]
+            else { return }
+            let items = raw.compactMap { entry -> NewsItem? in
+                guard let title = entry["title"] as? String,
+                      let link = entry["link"] as? String else { return nil }
+                return NewsItem(
+                    title: title,
+                    publisher: entry["publisher"] as? String ?? "",
+                    link: link,
+                    published: Date(timeIntervalSince1970: entry["providerPublishTime"] as? Double ?? 0))
+            }
+            DispatchQueue.main.async { self?.renderNews(items) }
+        }.resume()
+    }
+
+    func renderNews(_ items: [NewsItem]) {
+        newsHeader.isHidden = items.isEmpty
+        for (index, entry) in newsItems.enumerated() {
+            guard index < items.count else {
+                entry.isHidden = true
+                continue
+            }
+            let news = items[index]
+            entry.isHidden = false
+            entry.representedObject = news.link
+
+            // Headlines can be long; trim on a word boundary so the menu keeps its width.
+            var headline = news.title
+            if headline.count > 64 {
+                headline = String(headline.prefix(64)).split(separator: " ").dropLast().joined(separator: " ") + "…"
+            }
+            let line = NSMutableAttributedString()
+            line.append(styled(headline, size: 12, weight: .medium))
+            line.append(styled("\n\(news.publisher) · \(relative(news.published))",
+                               size: 10, color: .secondaryLabelColor))
+            entry.attributedTitle = line
+        }
+    }
+
+    func relative(_ date: Date) -> String {
+        let minutes = Int(Date().timeIntervalSince(date) / 60)
+        if minutes < 1 { return "только что" }
+        if minutes < 60 { return "\(minutes) мин назад" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours) ч назад" }
+        return "\(hours / 24) дн назад"
     }
 
     @objc func refresh() {
@@ -80,7 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // Неактивные пункты меню macOS рисует серым, поэтому задаём attributedTitle сами.
+    // macOS dims disabled menu items on top of any color, so we style attributedTitle ourselves.
     func styled(_ text: String, size: CGFloat = 13, weight: NSFont.Weight = .regular,
                 color: NSColor = .labelColor, mono: Bool = false) -> NSAttributedString {
         let font = mono
@@ -89,7 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
     }
 
-    // SF Symbol как вложение в строку — рядом с текстом, с собственным цветом.
+    // An SF Symbol as a text attachment: inline with the text, with its own color.
     func icon(_ name: String, color: NSColor, size: CGFloat) -> NSAttributedString {
         let config = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
             .applying(.init(paletteColors: [color]))
@@ -116,8 +209,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let up = q.changePercent >= 0
-        // Приглушённые оттенки: на светлом меню-баре системные зелёный/красный слишком яркие,
-        // в тёмной теме берём чуть светлее, чтобы не проваливались.
+        // Muted shades: the system green/red are too loud on a light menu bar,
+        // while dark mode needs them lighter so they don't sink into the background.
         let accent = NSColor(name: nil) { appearance in
             let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             if up {
@@ -129,7 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let arrow = up ? "▲" : "▼"
 
-        // Титул: только цена, процент цветом и мелкая метка сессии — тикер виден в меню.
+        // Title: price, colored percentage and a small session mark — the ticker lives in the menu.
         let title = NSMutableAttributedString()
         title.append(styled(String(format: "%.2f  ", q.price), size: 13, weight: .semibold, mono: true))
         title.append(styled(String(format: "%@%.2f%%", arrow, abs(q.changePercent)),
@@ -157,8 +250,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessionLine.append(styled("  \(sessionName)  ·  \(q.name)", size: 12, weight: .semibold))
         sessionItem.attributedTitle = sessionLine
 
-        // Во время основных торгов regularMarketPrice — это живая цена, а не закрытие,
-        // и база для процента меняется: пре/пост считаем от закрытия, в сессии — от пред. закрытия.
+        // During regular hours regularMarketPrice is the live price rather than a close,
+        // and the base shifts: extended hours count from the close, regular hours from the previous close.
         let extended = q.session == .pre || q.session == .post
         let regularLabel = extended ? "Закрытие осн." : "Осн. сессия"
         let baseMark = "◂ база"
@@ -204,7 +297,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let previousClose = (meta["chartPreviousClose"] as? Double)
                 ?? (meta["previousClose"] as? Double) ?? regularPrice
 
-            // Последний непустой тик минутного ряда — это и есть цена pre/post-маркета.
+            // The last non-null tick of the minute series is the pre/post-market price.
             var lastPrice = regularPrice
             var lastStamp = (meta["regularMarketTime"] as? Double) ?? Date().timeIntervalSince1970
             if let stamps = result["timestamp"] as? [Double],
@@ -219,7 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
-            // Сессия определяется по времени последнего тика в торговых периодах Yahoo.
+            // The session follows from where the last tick falls in Yahoo's trading periods.
             var session = Session.closed
             if let periods = meta["currentTradingPeriod"] as? [String: Any] {
                 func inside(_ key: String) -> Bool {
@@ -233,7 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if inside("post") { session = .post }
             }
 
-            // В расширенных сессиях считаем изменение от закрытия основной сессии.
+            // In extended sessions the change is measured against the regular session close.
             let base = (session == .pre || session == .post) ? regularPrice : previousClose
             let change = lastPrice - base
             let changePercent = base == 0 ? 0 : change / base * 100

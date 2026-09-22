@@ -1,5 +1,5 @@
 #!/bin/bash
-# Ставит launch agent, чтобы виджет поднимался при входе в систему.
+# Installs a launch agent so the widget starts at login.
 set -euo pipefail
 cd "$(dirname "$0")"
 DIR="$(pwd)"
@@ -23,4 +23,4 @@ cat > "$PLIST" <<PLISTEOF
 PLISTEOF
 launchctl bootout "gui/$(id -u)/local.gpro.widget" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
-echo "Автозапуск включён. Отключить: launchctl bootout gui/\$(id -u) $PLIST"
+echo "Autostart enabled. Remove with: launchctl bootout gui/\$(id -u) $PLIST"

@@ -12,7 +12,7 @@ A single Swift file, no dependencies, no Xcode project — it builds with the sy
 
 In the menu bar: the price, the percentage change in color, and an icon for the current trading session — sunrise for pre-market, sun for regular hours, sunset for after-hours, moon when the market is closed.
 
-In the dropdown: the price to 4 decimals with the absolute change, the instrument name and session, the regular session close and the previous close marked with `◂ база` — "base" (the number the percentage is computed from), the day and 52-week ranges, and the timestamps of the last tick and the last poll.
+In the dropdown: the price to 4 decimals with the absolute change, the instrument name and session, the regular session close and the previous close marked with `◂ база` — "base" (the number the percentage is computed from), the day and 52-week ranges, the timestamps of the last tick and the last poll, and the three latest headlines for the symbol — click one to open it in the browser.
 
 ## Install
 
@@ -56,6 +56,7 @@ The Yahoo Finance chart API, one-minute bars with `includePrePost=true`:
 
 ```
 https://query1.finance.yahoo.com/v8/finance/chart/GPRO?interval=1m&range=1d&includePrePost=true
+https://query1.finance.yahoo.com/v1/finance/search?q=GPRO&newsCount=3    # headlines, polled every 5 minutes
 ```
 
 The extended-hours price is taken as the last non-null `close` of the minute series — it is not exposed in `meta`, which only carries the regular session price. The current session is determined by where the tick's timestamp falls within `meta.currentTradingPeriod`. During pre-market and after-hours the percentage is computed against the regular session close, during regular hours against the previous close, matching Yahoo itself.
