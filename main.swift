@@ -551,11 +551,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mark = sessionIcon(q.session)
         title.append(NSAttributedString(string: "  "))
         title.append(icon(mark.symbol, color: mark.color, size: 10))
-        // The account total rides along after a divider: same weight as the price so it
-        // reads as a second figure, with a small "k" that stays out of the way.
+        // The account total rides along after the session mark: same weight as the price
+        // so it reads as a second figure, with a small "k" that stays out of the way.
         if let account = balance {
             let fresh = Date().timeIntervalSince(account.received) <= 120
-            title.append(styled("   │   ", size: 11, color: .quaternaryLabelColor))
+            title.append(styled("   ", size: 11))
             title.append(styled(String(format: "%.0f", account.value / 1000),
                                 size: 13, weight: .semibold,
                                 color: fresh ? .labelColor : .tertiaryLabelColor, mono: true))
