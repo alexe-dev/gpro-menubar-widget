@@ -1,20 +1,20 @@
 # GPRO menu bar widget
 
-Нативный виджет для меню-бара macOS: текущая цена акции, **включая пре- и пост-маркет**, обновление раз в 5 секунд.
+A native macOS menu bar widget showing a stock's current price, **including pre-market and after-hours**, refreshed every 5 seconds.
 
-Один файл на Swift, без зависимостей и без Xcode-проекта — собирается системным `swiftc`.
+A single Swift file, no dependencies, no Xcode project — it builds with the system `swiftc`.
 
 ```
 1.30 ▲0.02% 🌅
 ```
 
-## Что показывает
+## What it shows
 
-В меню-баре — цена, изменение в процентах (цветом) и иконка текущей торговой сессии: восход для пре-маркета, солнце для основных торгов, закат для пост-маркета, луна когда рынок закрыт.
+In the menu bar: the price, the percentage change in color, and an icon for the current trading session — sunrise for pre-market, sun for regular hours, sunset for after-hours, moon when the market is closed.
 
-В выпадающем меню — цена с точностью до 4 знаков и абсолютная дельта, название бумаги и сессия, закрытие основной сессии и предыдущее закрытие с пометкой `◂ база` (число, от которого считается процент), дневной и 52-недельный диапазон, время последнего тика и последнего опроса.
+In the dropdown: the price to 4 decimals with the absolute change, the instrument name and session, the regular session close and the previous close marked with `◂ база` — "base" (the number the percentage is computed from), the day and 52-week ranges, and the timestamps of the last tick and the last poll.
 
-## Установка
+## Install
 
 ```bash
 git clone git@github.com:alexe-dev/gpro-menubar-widget.git
@@ -23,47 +23,47 @@ cd gpro-menubar-widget
 open GPRO.app
 ```
 
-Автозапуск при входе в систему:
+Launch at login:
 
 ```bash
 ./install-autostart.sh
 ```
 
-Скрипт ставит launch agent `local.gpro.widget`. Выход через меню приложения не приводит к перезапуску, падение — приводит. Отключить:
+This installs the `local.gpro.widget` launch agent. Quitting from the app's own menu does not trigger a restart; a crash does. To remove it:
 
 ```bash
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/local.gpro.widget.plist
 ```
 
-## Настройка
+## Configuration
 
-Переменные окружения:
+Environment variables:
 
-| Переменная | По умолчанию | Описание |
+| Variable | Default | Description |
 |---|---|---|
-| `TICKER` | `GPRO` | Любой символ Yahoo Finance |
-| `REFRESH` | `5` | Период опроса в секундах |
+| `TICKER` | `GPRO` | Any Yahoo Finance symbol |
+| `REFRESH` | `5` | Poll interval in seconds |
 
 ```bash
 TICKER=AAPL REFRESH=2 open GPRO.app
 ```
 
-Для launch agent значения задаются через ключ `EnvironmentVariables` в plist.
+For the launch agent, set these through the plist's `EnvironmentVariables` key.
 
-## Откуда данные
+## Where the data comes from
 
-Yahoo Finance chart API, минутные бары с `includePrePost=true`:
+The Yahoo Finance chart API, one-minute bars with `includePrePost=true`:
 
 ```
 https://query1.finance.yahoo.com/v8/finance/chart/GPRO?interval=1m&range=1d&includePrePost=true
 ```
 
-Цена расширенной сессии берётся как последний непустой `close` минутного ряда — в `meta` её нет, там только цена основной сессии. Текущая сессия определяется попаданием времени тика в `meta.currentTradingPeriod`. В пре- и пост-маркете процент считается от закрытия основной сессии, в основных торгах — от предыдущего закрытия, как на самом Yahoo.
+The extended-hours price is taken as the last non-null `close` of the minute series — it is not exposed in `meta`, which only carries the regular session price. The current session is determined by where the tick's timestamp falls within `meta.currentTradingPeriod`. During pre-market and after-hours the percentage is computed against the regular session close, during regular hours against the previous close, matching Yahoo itself.
 
-Это не тиковый поток: последний минутный бар обновляется внутри минуты, поэтому реальная гранулярность — секунды-десятки секунд, а не строго период опроса. Для настоящего реального времени нужен WebSocket-провайдер вроде Finnhub или Polygon (требуют ключ).
+This is not a tick stream: the latest minute bar updates within the minute, so the real granularity is seconds to tens of seconds rather than strictly the poll interval. For genuine real-time data you would need a WebSocket provider such as Finnhub or Polygon (both require an API key).
 
-Неофициальный эндпоинт без гарантий стабильности. Для личного использования.
+Unofficial endpoint with no stability guarantees. Built for personal use.
 
-## Лицензия
+## License
 
 MIT
