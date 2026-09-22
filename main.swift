@@ -560,6 +560,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 size: 13, weight: .semibold,
                                 color: fresh ? .labelColor : .tertiaryLabelColor, mono: true))
             title.append(styled("k", size: 10, weight: .medium, color: .secondaryLabelColor))
+
+            // Health is the number that matters when it drops, so it is colored by level.
+            if let health = account.health {
+                let level = Double(health.filter("0123456789.".contains)) ?? 100
+                let color: NSColor = fresh
+                    ? (level < 20 ? NSColor(srgbRed: 0.72, green: 0.20, blue: 0.18, alpha: 1)
+                       : level < 40 ? NSColor(srgbRed: 0.80, green: 0.50, blue: 0.10, alpha: 1)
+                       : .secondaryLabelColor)
+                    : .tertiaryLabelColor
+                title.append(NSAttributedString(string: "  "))
+                title.append(icon("heart.fill", color: color, size: 9))
+                title.append(styled(" " + health, size: 12, weight: .medium, color: color, mono: true))
+            }
         }
         item.button?.attributedTitle = title
 

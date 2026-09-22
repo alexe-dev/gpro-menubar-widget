@@ -71,7 +71,7 @@ Unofficial endpoint with no stability guarantees. Built for personal use.
 
 ## Trading 212 balance (optional)
 
-The `extension/` folder holds a Chrome extension that reads the CFD account summary from an open Trading 212 tab and posts it to the widget over loopback (`127.0.0.1:47632`, configurable via `BALANCE_PORT`). The account total then appears in the menu bar in thousands, with the profit, margin, health and cash breakdown in the dropdown.
+The `extension/` folder holds a Chrome extension that reads the CFD account summary from an open Trading 212 tab and posts it to the widget over loopback (`127.0.0.1:47632`, configurable via `BALANCE_PORT`). The account total then appears in the menu bar in thousands next to the health percentage, with the profit, margin and cash breakdown in the dropdown. Health is colored by level: amber below 40%, red below 20%.
 
 Nothing is scraped by the widget itself and nothing leaves the machine — see `extension/README.md`.
 
