@@ -430,7 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         balanceDetailItem.isHidden = false
 
         // A tab that stopped updating is worse than no number, so age is always shown.
-        let stale = Date().timeIntervalSince(account.received) > 120
+        let stale = Date().timeIntervalSince(account.received) > 90
         let primary: NSColor = stale ? .secondaryLabelColor : .labelColor
 
         let line = NSMutableAttributedString()
@@ -554,20 +554,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The account total rides along after the session mark: same weight as the price
         // so it reads as a second figure, with a small "k" that stays out of the way.
         if let account = balance {
-            let fresh = Date().timeIntervalSince(account.received) <= 120
+            let fresh = Date().timeIntervalSince(account.received) <= 90
             title.append(NSAttributedString(string: "  "))
             title.append(styled(String(format: "%.0f", account.value / 1000),
                                 size: 13, weight: .semibold,
                                 color: fresh ? .labelColor : .tertiaryLabelColor, mono: true))
-            title.append(styled("k", size: 10, weight: .medium, color: .secondaryLabelColor))
+            title.append(styled("k", size: 10, weight: .medium,
+                                color: fresh ? .secondaryLabelColor : .tertiaryLabelColor))
 
             // Health is the number that matters when it drops, so it is colored by level.
             if let health = account.health {
                 let level = Double(health.filter("0123456789.".contains)) ?? 100
                 let color: NSColor = fresh
                     ? (level < 20 ? NSColor(srgbRed: 0.72, green: 0.20, blue: 0.18, alpha: 1)
-                       : level < 40 ? NSColor(srgbRed: 0.80, green: 0.50, blue: 0.10, alpha: 1)
-                       : .secondaryLabelColor)
+                       : level < 40 ? NSColor(srgbRed: 0.72, green: 0.44, blue: 0.05, alpha: 1)
+                       : .labelColor)
                     : .tertiaryLabelColor
                 title.append(NSAttributedString(string: "  "))
                 title.append(icon("heart.fill", color: color, size: 9))

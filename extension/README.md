@@ -23,6 +23,6 @@ The extension popup shows all five values. The menu bar shows the account total 
 
 ## Limits
 
-The tab has to stay open — minimized or in the background is fine, closed is not. If the numbers stop arriving, the widget marks them `stale` after two minutes rather than showing a frozen figure as current.
+The tab has to stay open — minimized or in the background is fine, closed is not. Unchanged numbers are resent every 30 seconds as a heartbeat, so the widget can tell a quiet account from a closed tab; if nothing arrives for 90 seconds it marks the data stale rather than showing a frozen figure as current.
 
 If Trading 212 renames the test ids and the labels together, reading breaks and the popup says so. Fixing it means updating `TESTIDS` / `LABELS` in `content.js`.

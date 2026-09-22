@@ -3,8 +3,11 @@
 
 const POLL_MS = 5000;
 
+const HEARTBEAT_MS = 30000;
+
 let port = 47632;
 let lastPayload = null;
+let lastSentAt = 0;
 
 chrome.storage.local.get({ port: 47632 }).then((stored) => {
   port = stored.port;
@@ -129,13 +132,19 @@ function readAccount() {
 function send(payload) {
   chrome.runtime.sendMessage({ type: "balance", port, payload }, (response) => {
     // The widget may simply not be running; the next tick retries.
-    if (!chrome.runtime.lastError && response?.ok) lastPayload = JSON.stringify(payload);
+    if (chrome.runtime.lastError || !response?.ok) return;
+    lastPayload = JSON.stringify(payload);
+    lastSentAt = Date.now();
   });
 }
 
 function tick() {
   const payload = readAccount();
-  if (payload && JSON.stringify(payload) !== lastPayload) send(payload);
+  if (!payload) return;
+  // Unchanged numbers still get resent as a heartbeat: otherwise a quiet market
+  // looks the same to the widget as a closed tab, and it marks the data stale.
+  const changed = JSON.stringify(payload) !== lastPayload;
+  if (changed || Date.now() - lastSentAt > HEARTBEAT_MS) send(payload);
 }
 
 function start() {
