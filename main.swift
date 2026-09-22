@@ -553,26 +553,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         title.append(icon(mark.symbol, color: mark.color, size: 10))
         // The account total rides along after the session mark: same weight as the price
         // so it reads as a second figure, with a small "k" that stays out of the way.
+        // Age is flagged with a mark rather than by dimming — a number worth showing is
+        // worth showing legibly.
         if let account = balance {
-            let fresh = Date().timeIntervalSince(account.received) <= 90
             title.append(NSAttributedString(string: "  "))
             title.append(styled(String(format: "%.0f", account.value / 1000),
-                                size: 13, weight: .semibold,
-                                color: fresh ? .labelColor : .tertiaryLabelColor, mono: true))
-            title.append(styled("k", size: 10, weight: .medium,
-                                color: fresh ? .secondaryLabelColor : .tertiaryLabelColor))
+                                size: 13, weight: .semibold, mono: true))
+            title.append(styled("k", size: 10, weight: .medium, color: .secondaryLabelColor))
 
             // Health is the number that matters when it drops, so it is colored by level.
             if let health = account.health {
                 let level = Double(health.filter("0123456789.".contains)) ?? 100
-                let color: NSColor = fresh
-                    ? (level < 20 ? NSColor(srgbRed: 0.72, green: 0.20, blue: 0.18, alpha: 1)
-                       : level < 40 ? NSColor(srgbRed: 0.72, green: 0.44, blue: 0.05, alpha: 1)
-                       : .labelColor)
-                    : .tertiaryLabelColor
+                let color: NSColor = level < 20
+                    ? NSColor(srgbRed: 0.72, green: 0.20, blue: 0.18, alpha: 1)
+                    : level < 40 ? NSColor(srgbRed: 0.72, green: 0.44, blue: 0.05, alpha: 1)
+                    : .labelColor
                 title.append(NSAttributedString(string: "  "))
                 title.append(icon("heart.fill", color: color, size: 9))
-                title.append(styled(" " + health, size: 12, weight: .medium, color: color, mono: true))
+                title.append(styled(" " + health, size: 12, weight: .semibold, color: color, mono: true))
+            }
+
+            if Date().timeIntervalSince(account.received) > 90 {
+                title.append(NSAttributedString(string: " "))
+                title.append(icon("clock.badge.exclamationmark.fill", color: .systemOrange, size: 9))
             }
         }
         item.button?.attributedTitle = title
