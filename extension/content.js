@@ -3,15 +3,6 @@
 
 const POLL_MS = 5000;
 
-// Cards are found by their visible label: Trading 212's class names are generated
-// and change between releases, the wording of these labels does not.
-const FIELDS = {
-  accountValue: ["ACCOUNT VALUE"],
-  margin: ["MARGIN", "TOTAL MARGIN"],
-  health: ["HEALTH"],
-  cash: ["CASH"],
-};
-
 let port = 47632;
 let lastPayload = null;
 
@@ -31,9 +22,28 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
 
 // --- parsing -------------------------------------------------------------
 
-// Handles both "Kč 177,553.61" and "177 553,61 Kč": the last separator is the decimal one.
+// Trading 212 ships stable data-testid attributes on the portfolio cards, so those
+// are the primary anchors; the visible labels are only a fallback.
+const TESTIDS = {
+  amount: "cfd-portfolio-stats-total-amount",
+  currency: "cfd-portfolio-stats-total-currency",
+  result: "cfd-portfolio-result-value",
+  margin: "cfd-portfolio-margin-widget",
+  health: "cfd-portfolio-health-widget",
+  cash: "account-cash-widget",
+};
+
+const LABELS = {
+  margin: ["MARGIN", "TOTAL MARGIN"],
+  health: ["HEALTH"],
+  cash: ["CASH"],
+};
+
+const byTestId = (id) => document.querySelector(`[data-testid="${id}"]`);
+
+// Handles "Kč 177,473.55" as well as "177 473,55 Kč": the last separator is the decimal one.
 function parseAmount(text) {
-  const cleaned = text.replace(/[^\d.,]/g, "");
+  const cleaned = (text || "").replace(/\u00a0/g, " ").replace(/[^\d.,]/g, "");
   if (!cleaned) return null;
   const lastComma = cleaned.lastIndexOf(",");
   const lastDot = cleaned.lastIndexOf(".");
@@ -46,70 +56,71 @@ function parseAmount(text) {
 }
 
 function currencyOf(text) {
-  const match = text.match(/Kč|[€$£¥₽]|EUR|USD|GBP|CZK/);
+  const match = (text || "").match(/Kč|[€$£¥₽]|EUR|USD|GBP|CZK/);
   return match ? match[0] : "";
 }
 
-function labelledCard(labels) {
+// Fallback for the side cards if a testid ever disappears: find the label, then the
+// nearest ancestor that actually holds a number.
+function byLabel(labels) {
   const wanted = labels.map((label) => label.toUpperCase());
-  const nodes = document.querySelectorAll("div, span, p, h1, h2, h3, h4, label");
-  for (const node of nodes) {
-    const text = node.textContent.trim().toUpperCase();
-    if (!wanted.includes(text)) continue;
-    // The label itself carries no number: walk up until an ancestor holds one.
+  for (const node of document.querySelectorAll("div, span, p")) {
+    if (node.children.length || !wanted.includes(node.textContent.trim().toUpperCase())) continue;
     let card = node.parentElement;
-    for (let depth = 0; depth < 4 && card; depth += 1) {
+    for (let depth = 0; depth < 5 && card; depth += 1) {
       const rest = card.textContent.replace(node.textContent, "");
-      if (/\d/.test(rest)) return { card, rest: rest.trim() };
+      if (/\d/.test(rest)) return rest.trim();
       card = card.parentElement;
     }
   }
   return null;
 }
 
-function valueFor(labels) {
-  const found = labelledCard(labels);
-  if (!found) return null;
-  return { amount: parseAmount(found.rest), text: found.rest, card: found.card };
+// A card's own label is part of its text, so it is stripped before parsing.
+function cardValue(testId, labels) {
+  const card = byTestId(testId);
+  if (card) {
+    const text = card.textContent.replace(new RegExp(labels.join("|"), "i"), "").trim();
+    if (/\d/.test(text)) return text;
+  }
+  return byLabel(labels);
 }
 
-// The profit line sits under the account value; its sign shows up as an arrow
-// or a minus rather than in the number itself, so the color is the tiebreaker.
-function profitFrom(accountCard) {
-  if (!accountCard) return {};
-  for (const node of accountCard.querySelectorAll("*")) {
-    const text = node.textContent.trim();
-    const percent = text.match(/\(\s*(\d+[.,]\d+)\s*%\s*\)/);
-    if (!percent || node.children.length > 3) continue;
-    const amount = parseAmount(text.slice(0, percent.index));
-    if (amount === null) continue;
-    const color = getComputedStyle(node).color;
-    const rgb = color.match(/\d+/g)?.map(Number) ?? [0, 0, 0];
-    const negative = /[-−↘]/.test(text) || (rgb[0] > rgb[1] + 30 && rgb[0] > rgb[2] + 30);
-    return {
-      pnl: negative ? -amount : amount,
-      pnlPercent: parseAmount(percent[1]) * (negative ? -1 : 1),
-    };
-  }
-  return {};
+// The sign of the result lives in the color and the arrow icon, not in the number.
+function profit() {
+  const node = byTestId(TESTIDS.result);
+  if (!node) return {};
+  const text = node.textContent.replace(/\u00a0/g, " ");
+  const percent = text.match(/\(\s*(\d+[.,]\d+)\s*%\s*\)/);
+  const amount = parseAmount(percent ? text.slice(0, percent.index) : text);
+  if (amount === null) return {};
+
+  const rgb = getComputedStyle(node).color.match(/\d+/g)?.map(Number) ?? [0, 0, 0];
+  const negative = /[-−↘]/.test(text) || (rgb[0] > rgb[1] + 30 && rgb[0] > rgb[2] + 30);
+  const sign = negative ? -1 : 1;
+  return {
+    pnl: amount * sign,
+    pnlPercent: percent ? parseAmount(percent[1]) * sign : null,
+  };
 }
 
 function readAccount() {
-  const account = valueFor(FIELDS.accountValue);
-  if (!account || account.amount === null) return null;
+  const amountNode = byTestId(TESTIDS.amount);
+  const balance = parseAmount(amountNode?.textContent);
+  if (balance === null) return null;
 
-  const margin = valueFor(FIELDS.margin);
-  const health = valueFor(FIELDS.health);
-  const cash = valueFor(FIELDS.cash);
+  const currencyNode = byTestId(TESTIDS.currency);
+  const margin = cardValue(TESTIDS.margin, LABELS.margin);
+  const health = cardValue(TESTIDS.health, LABELS.health);
+  const cash = cardValue(TESTIDS.cash, LABELS.cash);
 
   return {
-    balance: account.amount,
-    currency: currencyOf(account.text) || "Kč",
-    label: "Account value",
-    margin: margin?.amount ?? null,
-    health: health ? health.text.match(/\d+\s*%/)?.[0] ?? null : null,
-    cash: cash?.amount ?? null,
-    ...profitFrom(account.card),
+    balance,
+    currency: currencyOf(currencyNode?.textContent) || currencyOf(amountNode.textContent) || "Kč",
+    margin: parseAmount(margin),
+    health: health ? health.match(/\d+\s*%/)?.[0] ?? null : null,
+    cash: parseAmount(cash),
+    ...profit(),
   };
 }
 

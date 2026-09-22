@@ -13,7 +13,11 @@ It touches nothing but the rendered page: no private endpoints, no credentials, 
 
 ## What it reads
 
-`ACCOUNT VALUE` and the profit line under it, plus `MARGIN`, `HEALTH` and `CASH`. Cards are located by those visible labels, not by CSS classes — Trading 212 generates class names that change between releases, the labels do not.
+`ACCOUNT VALUE` and the result line under it, plus `MARGIN`, `HEALTH` and `CASH`.
+
+Cards are anchored on the `data-testid` attributes Trading 212 puts on them (`cfd-portfolio-stats-total-amount`, `cfd-portfolio-result-value`, `cfd-portfolio-margin-widget`, `cfd-portfolio-health-widget`, `account-cash-widget`), with a lookup by visible label as a fallback. CSS class names are generated per release and are never used.
+
+The result is shown without a sign — the loss is conveyed by red text and a down arrow — so the sign is taken from the element's computed color.
 
 The extension popup shows all five values. The menu bar shows the account total in thousands; the full breakdown lives in the widget's dropdown.
 
@@ -21,4 +25,4 @@ The extension popup shows all five values. The menu bar shows the account total 
 
 The tab has to stay open — minimized or in the background is fine, closed is not. If the numbers stop arriving, the widget marks them `stale` after two minutes rather than showing a frozen figure as current.
 
-If Trading 212 renames those labels, reading breaks and the popup says so. Fixing it means updating `FIELDS` in `content.js`.
+If Trading 212 renames the test ids and the labels together, reading breaks and the popup says so. Fixing it means updating `TESTIDS` / `LABELS` in `content.js`.
