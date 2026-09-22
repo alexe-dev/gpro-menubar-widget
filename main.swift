@@ -551,9 +551,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mark = sessionIcon(q.session)
         title.append(NSAttributedString(string: "  "))
         title.append(icon(mark.symbol, color: mark.color, size: 10))
+        // The account total rides along after a divider: same weight as the price so it
+        // reads as a second figure, with a small "k" that stays out of the way.
         if let account = balance {
-            title.append(styled(String(format: "   %.0fk", account.value / 1000),
-                                size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
+            let fresh = Date().timeIntervalSince(account.received) <= 120
+            title.append(styled("   │   ", size: 11, color: .quaternaryLabelColor))
+            title.append(styled(String(format: "%.0f", account.value / 1000),
+                                size: 13, weight: .semibold,
+                                color: fresh ? .labelColor : .tertiaryLabelColor, mono: true))
+            title.append(styled("k", size: 10, weight: .medium, color: .secondaryLabelColor))
         }
         item.button?.attributedTitle = title
 
