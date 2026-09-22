@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Trading 212 balance bridge",
+  "version": "1.0",
+  "description": "Reads the balance from an open Trading 212 tab and forwards it to the macOS menu bar widget on localhost.",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.trading212.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Trading 212 balance bridge"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

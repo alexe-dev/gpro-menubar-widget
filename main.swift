@@ -1,4 +1,5 @@
 import Cocoa
+import Network
 
 // Symbol resolution: saved choice → TICKER env var → GPRO.
 var symbol: String {
@@ -31,6 +32,90 @@ struct Quote {
     let tickTime: Date
 }
 
+struct Balance {
+    let value: Double          // account value
+    let currency: String
+    let pnl: Double?
+    let pnlPercent: Double?
+    let margin: Double?
+    let health: String?
+    let cash: Double?
+    let received: Date
+}
+
+/// Loopback HTTP endpoint the Chrome extension posts the Trading 212 balance to.
+/// Bound to 127.0.0.1 only: nothing on the network can reach it.
+final class BalanceServer {
+    private var listener: NWListener?
+    private let onUpdate: (Balance) -> Void
+
+    init(onUpdate: @escaping (Balance) -> Void) {
+        self.onUpdate = onUpdate
+    }
+
+    func start(port: UInt16) {
+        let params = NWParameters.tcp
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1",
+                                                          port: NWEndpoint.Port(rawValue: port)!)
+        guard let listener = try? NWListener(using: params) else {
+            FileHandle.standardError.write("balance server: port \(port) unavailable\n".data(using: .utf8)!)
+            return
+        }
+        listener.newConnectionHandler = { [weak self] connection in self?.handle(connection) }
+        listener.start(queue: .global(qos: .utility))
+        self.listener = listener
+    }
+
+    private func handle(_ connection: NWConnection) {
+        connection.start(queue: .global(qos: .utility))
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, _, _ in
+            guard let self = self, let data = data,
+                  let request = String(data: data, encoding: .utf8) else {
+                connection.cancel()
+                return
+            }
+
+            // The content script runs on trading212.com, so preflight has to be answered.
+            let cors = "Access-Control-Allow-Origin: *\r\n"
+                + "Access-Control-Allow-Methods: POST, OPTIONS\r\n"
+                + "Access-Control-Allow-Headers: Content-Type\r\n"
+            if request.hasPrefix("OPTIONS") {
+                self.reply(connection, "HTTP/1.1 204 No Content\r\n" + cors + "Content-Length: 0\r\n\r\n")
+                return
+            }
+
+            guard let separator = request.range(of: "\r\n\r\n") else {
+                connection.cancel()
+                return
+            }
+            let body = String(request[separator.upperBound...])
+            guard let payload = body.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+                  let value = json["balance"] as? Double else {
+                self.reply(connection, "HTTP/1.1 400 Bad Request\r\n" + cors + "Content-Length: 0\r\n\r\n")
+                return
+            }
+
+            self.onUpdate(Balance(
+                value: value,
+                currency: json["currency"] as? String ?? "",
+                pnl: json["pnl"] as? Double,
+                pnlPercent: json["pnlPercent"] as? Double,
+                margin: json["margin"] as? Double,
+                health: json["health"] as? String,
+                cash: json["cash"] as? Double,
+                received: Date()))
+            self.reply(connection, "HTTP/1.1 200 OK\r\n" + cors + "Content-Length: 2\r\n\r\nok")
+        }
+    }
+
+    // Closing the socket must wait for the response to actually be written.
+    private func reply(_ connection: NWConnection, _ response: String) {
+        connection.send(content: response.data(using: .utf8),
+                        completion: .contentProcessed { _ in connection.cancel() })
+    }
+}
+
 enum Lang: String {
     case ru, en
 
@@ -58,6 +143,11 @@ let strings: [String: (String, String)] = [
                          "Any Yahoo Finance symbol, for example AAPL or BTC-USD."),
     "ok": ("Готово", "OK"),
     "cancel": ("Отмена", "Cancel"),
+    "balance": ("Счёт", "Account"),
+    "margin": ("Маржа", "Margin"),
+    "health": ("Health", "Health"),
+    "cash": ("Кэш", "Cash"),
+    "stale": ("данные устарели", "stale"),
     "unknownSymbol": ("Не нашёл такой тикер — оставил %@", "No such symbol — keeping %@"),
     "quit": ("Выход", "Quit"),
     "error": ("Ошибка загрузки · повтор через %d с", "Fetch failed · retrying in %ds"),
@@ -110,6 +200,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let newsCount = 3
     let languageItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var symbolItem = NSMenuItem()
+    let balanceItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    var balanceServer: BalanceServer?
+    let balanceDetailItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    var balance: Balance?
+    let balancePort: UInt16 = UInt16(ProcessInfo.processInfo.environment["BALANCE_PORT"] ?? "") ?? 47632
     var lastQuote: Quote?
     var refreshItem = NSMenuItem()
     var webItem = NSMenuItem()
@@ -125,6 +220,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             $0.isEnabled = true
             menu.addItem($0)
         }
+        balanceItem.isEnabled = true
+        balanceItem.isHidden = true
+        menu.addItem(balanceItem)
+        balanceDetailItem.isEnabled = true
+        balanceDetailItem.isHidden = true
+        menu.addItem(balanceDetailItem)
+
         menu.addItem(.separator())
         newsHeader.isEnabled = true
         newsHeader.attributedTitle = styled("Новости", size: 11, weight: .semibold, color: .secondaryLabelColor)
@@ -181,6 +283,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.refreshNews()
         }
         newsTimer?.tolerance = 30
+
+        // The Chrome extension pushes the Trading 212 balance here; the widget never scrapes anything itself.
+        balanceServer = BalanceServer { [weak self] balance in
+            DispatchQueue.main.async { self?.renderBalance(balance) }
+        }
+        balanceServer?.start(port: balancePort)
     }
 
     @objc func switchLanguage(_ sender: NSMenuItem) {
@@ -308,6 +416,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func renderBalance(_ balance: Balance?) {
+        if let balance = balance {
+            self.balance = balance
+            render(lastQuote)   // the menu bar title carries the account total too
+        }
+        guard let account = self.balance else {
+            balanceItem.isHidden = true
+            balanceDetailItem.isHidden = true
+            return
+        }
+        balanceItem.isHidden = false
+        balanceDetailItem.isHidden = false
+
+        // A tab that stopped updating is worse than no number, so age is always shown.
+        let stale = Date().timeIntervalSince(account.received) > 120
+        let primary: NSColor = stale ? .secondaryLabelColor : .labelColor
+
+        let line = NSMutableAttributedString()
+        line.append(icon("wallet.bifold.fill", color: .secondaryLabelColor, size: 11))
+        line.append(styled(String(format: "  %@  %@ %@", t("balance"), grouped(account.value), account.currency),
+                           size: 13, weight: .semibold, color: primary, mono: true))
+        if let pnl = account.pnl {
+            let positive = pnl >= 0
+            let color: NSColor = stale
+                ? .secondaryLabelColor
+                : (positive ? NSColor(srgbRed: 0.10, green: 0.45, blue: 0.24, alpha: 1)
+                            : NSColor(srgbRed: 0.72, green: 0.20, blue: 0.18, alpha: 1))
+            var text = String(format: "   %@%@", positive ? "+" : "−", grouped(abs(pnl)))
+            if let percent = account.pnlPercent {
+                text += String(format: "  (%.2f%%)", abs(percent))
+            }
+            line.append(styled(text, size: 12, weight: .medium, color: color, mono: true))
+        }
+        balanceItem.attributedTitle = line
+
+        var parts: [String] = []
+        if let margin = account.margin { parts.append("\(t("margin"))  \(grouped(margin))") }
+        if let health = account.health { parts.append("\(t("health"))  \(health)") }
+        if let cash = account.cash { parts.append("\(t("cash"))  \(grouped(cash))") }
+        let detail = NSMutableAttributedString()
+        detail.append(styled(parts.joined(separator: "     ·     "),
+                             size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
+        detail.append(styled("   \(relative(account.received))\(stale ? " · " + t("stale") : "")",
+                             size: 10, color: stale ? .systemOrange : .tertiaryLabelColor))
+        balanceDetailItem.attributedTitle = detail
+    }
+
+    func grouped(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = " "
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
+        return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
+    }
+
     func relative(_ date: Date) -> String {
         let minutes = Int(Date().timeIntervalSince(date) / 60)
         if minutes < 1 { return t("justNow") }
@@ -324,6 +488,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self?.inFlight = false
                 self?.render(quote)
+                self?.renderBalance(nil)
             }
         }
     }
@@ -386,6 +551,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mark = sessionIcon(q.session)
         title.append(NSAttributedString(string: "  "))
         title.append(icon(mark.symbol, color: mark.color, size: 10))
+        if let account = balance {
+            title.append(styled(String(format: "   %.0fk", account.value / 1000),
+                                size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
+        }
         item.button?.attributedTitle = title
 
         let headline = NSMutableAttributedString()

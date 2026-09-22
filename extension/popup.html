@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        width: 280px;
+        margin: 0;
+        padding: 16px;
+        font: 13px -apple-system, system-ui, sans-serif;
+        font-variant-numeric: tabular-nums;
+      }
+      h1 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .55; margin: 0 0 6px; }
+      .total { font-size: 24px; font-weight: 600; }
+      .pnl { font-size: 13px; font-weight: 500; margin-top: 2px; }
+      .pnl.up { color: #1a7a3d; }
+      .pnl.down { color: #b23b33; }
+      .grid { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; margin-top: 14px; }
+      .grid div:nth-child(odd) { opacity: .6; }
+      .grid div:nth-child(even) { font-weight: 500; }
+      .status { margin-top: 14px; font-size: 11px; opacity: .55; line-height: 1.4; }
+      label { display: block; margin-top: 12px; font-size: 11px; opacity: .55; }
+      input { width: 100%; margin-top: 3px; padding: 5px; font: inherit; box-sizing: border-box; }
+      hr { border: 0; border-top: 1px solid currentColor; opacity: .12; margin: 14px 0 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Account value</h1>
+    <div class="total" id="total">—</div>
+    <div class="pnl" id="pnl"></div>
+
+    <div class="grid" id="grid"></div>
+
+    <hr />
+    <div class="status" id="status">Open a Trading 212 tab</div>
+    <label>
+      Widget port
+      <input id="port" type="number" value="47632" />
+    </label>
+    <script src="popup.js"></script>
+  </body>
+</html>

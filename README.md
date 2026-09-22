@@ -69,6 +69,12 @@ This is not a tick stream: the latest minute bar updates within the minute, so t
 
 Unofficial endpoint with no stability guarantees. Built for personal use.
 
+## Trading 212 balance (optional)
+
+The `extension/` folder holds a Chrome extension that reads the CFD account summary from an open Trading 212 tab and posts it to the widget over loopback (`127.0.0.1:47632`, configurable via `BALANCE_PORT`). The account total then appears in the menu bar in thousands, with the profit, margin, health and cash breakdown in the dropdown.
+
+Nothing is scraped by the widget itself and nothing leaves the machine — see `extension/README.md`.
+
 ## License
 
 MIT
