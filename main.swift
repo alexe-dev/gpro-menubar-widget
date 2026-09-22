@@ -555,7 +555,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // so it reads as a second figure, with a small "k" that stays out of the way.
         if let account = balance {
             let fresh = Date().timeIntervalSince(account.received) <= 120
-            title.append(styled("   ", size: 11))
+            title.append(NSAttributedString(string: "  "))
             title.append(styled(String(format: "%.0f", account.value / 1000),
                                 size: 13, weight: .semibold,
                                 color: fresh ? .labelColor : .tertiaryLabelColor, mono: true))
