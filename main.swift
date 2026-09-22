@@ -1,6 +1,14 @@
 import Cocoa
 
-let symbol = ProcessInfo.processInfo.environment["TICKER"] ?? "GPRO"
+// Symbol resolution: saved choice → TICKER env var → GPRO.
+var symbol: String {
+    get {
+        UserDefaults.standard.string(forKey: "ticker")
+            ?? ProcessInfo.processInfo.environment["TICKER"]
+            ?? "GPRO"
+    }
+    set { UserDefaults.standard.set(newValue.uppercased(), forKey: "ticker") }
+}
 let refreshInterval: TimeInterval = Double(ProcessInfo.processInfo.environment["REFRESH"] ?? "") ?? 5
 
 enum Session: String {
@@ -23,6 +31,63 @@ struct Quote {
     let tickTime: Date
 }
 
+enum Lang: String {
+    case ru, en
+
+    static var current: Lang {
+        get {
+            if let saved = UserDefaults.standard.string(forKey: "language"), let lang = Lang(rawValue: saved) {
+                return lang
+            }
+            return .en   // English is the default; the choice is remembered once made
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "language") }
+    }
+}
+
+// key: (ru, en)
+let strings: [String: (String, String)] = [
+    "loading": ("Загрузка…", "Loading…"),
+    "news": ("Новости", "News"),
+    "refresh": ("Обновить сейчас", "Refresh now"),
+    "openWeb": ("Открыть на Yahoo Finance", "Open on Yahoo Finance"),
+    "language": ("Язык", "Language"),
+    "symbol": ("Тикер: %@", "Symbol: %@"),
+    "changeSymbol": ("Смена тикера", "Change symbol"),
+    "changeSymbolInfo": ("Любой символ Yahoo Finance, например AAPL или BTC-USD.",
+                         "Any Yahoo Finance symbol, for example AAPL or BTC-USD."),
+    "ok": ("Готово", "OK"),
+    "cancel": ("Отмена", "Cancel"),
+    "unknownSymbol": ("Не нашёл такой тикер — оставил %@", "No such symbol — keeping %@"),
+    "quit": ("Выход", "Quit"),
+    "error": ("Ошибка загрузки · повтор через %d с", "Fetch failed · retrying in %ds"),
+    "pre": ("Пре-маркет", "Pre-market"),
+    "regular": ("Основные торги", "Regular hours"),
+    "post": ("Пост-маркет", "After hours"),
+    "closed": ("Рынок закрыт", "Market closed"),
+    "regularClose": ("Закрытие осн.", "Regular close"),
+    "regularLive": ("Осн. сессия", "Regular session"),
+    "prevClose": ("Пред. закрытие", "Previous close"),
+    "base": ("◂ база", "◂ base"),
+    "day": ("День", "Day"),
+    "week52": ("52 нед", "52wk"),
+    "tick": ("Тик", "Tick"),
+    "poll": ("опрос", "poll"),
+    "justNow": ("только что", "just now"),
+    "minutesAgo": ("%d мин назад", "%dm ago"),
+    "hoursAgo": ("%d ч назад", "%dh ago"),
+    "daysAgo": ("%d дн назад", "%dd ago"),
+]
+
+enum GPROStrings {
+    static func translate(_ key: String) -> String {
+        guard let pair = strings[key] else { return key }
+        return Lang.current == .ru ? pair.0 : pair.1
+    }
+}
+
+func t(_ key: String) -> String { GPROStrings.translate(key) }
+
 struct NewsItem {
     let title: String
     let publisher: String
@@ -33,22 +98,26 @@ struct NewsItem {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     var timer: Timer?
-    let priceItem = NSMenuItem(title: "Загрузка…", action: nil, keyEquivalent: "")
+    let priceItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let sessionItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let regularItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let rangeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let updatedItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var inFlight = false
     var newsTimer: Timer?
-    let newsHeader = NSMenuItem(title: "Новости", action: nil, keyEquivalent: "")
+    let newsHeader = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var newsItems: [NSMenuItem] = []
     let newsCount = 3
+    let languageItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    var symbolItem = NSMenuItem()
+    var lastQuote: Quote?
+    var refreshItem = NSMenuItem()
+    var webItem = NSMenuItem()
+    var quitItem = NSMenuItem()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         item.button?.title = "\(symbol) …"
-        priceItem.attributedTitle = NSAttributedString(
-            string: "Загрузка…",
-            attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor])
+        priceItem.attributedTitle = styled(t("loading"), size: 13, color: .secondaryLabelColor)
 
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -69,16 +138,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(entry)
         }
         menu.addItem(.separator())
-        let refreshItem = NSMenuItem(title: "Обновить сейчас", action: #selector(refresh), keyEquivalent: "r")
+        symbolItem = NSMenuItem(title: "", action: #selector(changeSymbol), keyEquivalent: "s")
+        symbolItem.target = self
+        menu.addItem(symbolItem)
+        refreshItem = NSMenuItem(title: "", action: #selector(refresh), keyEquivalent: "r")
         refreshItem.target = self
         menu.addItem(refreshItem)
-        let webItem = NSMenuItem(title: "Открыть на Yahoo Finance", action: #selector(openWeb), keyEquivalent: "o")
+        webItem = NSMenuItem(title: "", action: #selector(openWeb), keyEquivalent: "o")
         webItem.target = self
         menu.addItem(webItem)
+
+        let languageMenu = NSMenu()
+        languageMenu.autoenablesItems = false
+        for (lang, label) in [(Lang.ru, "Русский"), (Lang.en, "English")] {
+            let option = NSMenuItem(title: label, action: #selector(switchLanguage(_:)), keyEquivalent: "")
+            option.target = self
+            option.isEnabled = true
+            option.representedObject = lang.rawValue
+            option.state = Lang.current == lang ? .on : .off
+            languageMenu.addItem(option)
+        }
+        languageItem.submenu = languageMenu
+        languageItem.isEnabled = true
+        menu.addItem(languageItem)
+
         menu.addItem(.separator())
-        let quitItem = NSMenuItem(title: "Выход", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quitItem = NSMenuItem(title: "", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quitItem.target = NSApp
         menu.addItem(quitItem)
+        applyLanguage()
         item.menu = menu
 
         refresh()
@@ -94,6 +182,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         newsTimer?.tolerance = 30
     }
+
+    @objc func switchLanguage(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let lang = Lang(rawValue: raw) else { return }
+        Lang.current = lang
+        sender.menu?.items.forEach { $0.state = ($0.representedObject as? String) == raw ? .on : .off }
+        applyLanguage()
+        render(lastQuote)   // redraw what we already have instead of waiting for the next poll
+        refreshNews()
+    }
+
+    // Static menu labels; dynamic lines are translated inside render/renderNews.
+    func applyLanguage() {
+        newsHeader.attributedTitle = styled(t("news"), size: 11, weight: .semibold, color: .secondaryLabelColor)
+        symbolItem.title = String(format: t("symbol"), symbol)
+        refreshItem.title = t("refresh")
+        webItem.title = t("openWeb")
+        languageItem.title = t("language")
+        quitItem.title = t("quit")
+        if lastQuote == nil {
+            priceItem.attributedTitle = styled(t("loading"), size: 13, color: .secondaryLabelColor)
+        }
+    }
+
+    @objc func changeSymbol() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = t("changeSymbol")
+        alert.informativeText = t("changeSymbolInfo")
+        alert.addButton(withTitle: t("ok"))
+        alert.addButton(withTitle: t("cancel"))
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        field.stringValue = symbol
+        field.placeholderString = "GPRO"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let entered = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !entered.isEmpty, entered != symbol else { return }
+
+        // Keep the previous symbol until the new one actually resolves to a quote.
+        let previous = symbol
+        symbol = entered
+        lastQuote = nil
+        applyLanguage()
+        item.button?.attributedTitle = styled("\(entered) …", size: 12, color: .secondaryLabelColor)
+        fetch { [weak self] quote in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let quote = quote {
+                    self.render(quote)
+                    self.refreshNews()
+                } else {
+                    symbol = previous
+                    self.applyLanguage()
+                    let warning = NSAlert()
+                    warning.messageText = String(format: self.t("unknownSymbol"), previous)
+                    warning.runModal()
+                    self.refresh()
+                }
+            }
+        }
+    }
+
+    // Instance shim so the closure above can reach the global translator.
+    func t(_ key: String) -> String { GPROStrings.translate(key) }
 
     @objc func openWeb() {
         NSWorkspace.shared.open(URL(string: "https://finance.yahoo.com/quote/\(symbol)")!)
@@ -155,11 +310,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func relative(_ date: Date) -> String {
         let minutes = Int(Date().timeIntervalSince(date) / 60)
-        if minutes < 1 { return "только что" }
-        if minutes < 60 { return "\(minutes) мин назад" }
+        if minutes < 1 { return t("justNow") }
+        if minutes < 60 { return String(format: t("minutesAgo"), minutes) }
         let hours = minutes / 60
-        if hours < 24 { return "\(hours) ч назад" }
-        return "\(hours / 24) дн назад"
+        if hours < 24 { return String(format: t("hoursAgo"), hours) }
+        return String(format: t("daysAgo"), hours / 24)
     }
 
     @objc func refresh() {
@@ -204,10 +359,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func render(_ quote: Quote?) {
         guard let q = quote else {
-            updatedItem.attributedTitle = styled("Ошибка загрузки · повтор через \(Int(refreshInterval)) с",
+            updatedItem.attributedTitle = styled(String(format: t("error"), Int(refreshInterval)),
                                                  size: 11, color: .systemRed)
             return
         }
+        lastQuote = q
         let up = q.changePercent >= 0
         // Muted shades: the system green/red are too loud on a light menu bar,
         // while dark mode needs them lighter so they don't sink into the background.
@@ -240,10 +396,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let sessionName: String
         switch q.session {
-        case .pre: sessionName = "Пре-маркет"
-        case .regular: sessionName = "Основные торги"
-        case .post: sessionName = "Пост-маркет"
-        case .closed: sessionName = "Рынок закрыт"
+        case .pre: sessionName = t("pre")
+        case .regular: sessionName = t("regular")
+        case .post: sessionName = t("post")
+        case .closed: sessionName = t("closed")
         }
         let sessionLine = NSMutableAttributedString()
         sessionLine.append(icon(mark.symbol, color: mark.color, size: 11))
@@ -253,8 +409,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // During regular hours regularMarketPrice is the live price rather than a close,
         // and the base shifts: extended hours count from the close, regular hours from the previous close.
         let extended = q.session == .pre || q.session == .post
-        let regularLabel = extended ? "Закрытие осн." : "Осн. сессия"
-        let baseMark = "◂ база"
+        let regularLabel = extended ? t("regularClose") : t("regularLive")
+        let baseMark = t("base")
         let baseColor = NSColor.secondaryLabelColor
         let baseLine = NSMutableAttributedString()
         baseLine.append(styled(String(format: "%@  %.2f", regularLabel, q.regularPrice),
@@ -267,14 +423,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         regularItem.attributedTitle = baseLine
 
         rangeItem.attributedTitle = styled(
-            String(format: "День  %.2f – %.2f          52 нед  %.2f – %.2f",
+            String(format: "\(t("day"))  %.2f – %.2f          \(t("week52"))  %.2f – %.2f",
                    q.dayLow, q.dayHigh, q.weekLow, q.weekHigh),
             size: 12, weight: .medium, mono: true)
 
         let fmt = DateFormatter()
         fmt.dateFormat = "HH:mm:ss"
         updatedItem.attributedTitle = styled(
-            "Тик \(fmt.string(from: q.tickTime))   ·   опрос \(fmt.string(from: Date()))",
+            "\(t("tick")) \(fmt.string(from: q.tickTime))   ·   \(t("poll")) \(fmt.string(from: Date()))",
             size: 11, color: .secondaryLabelColor, mono: true)
     }
 

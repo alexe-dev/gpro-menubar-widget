@@ -12,7 +12,7 @@ A single Swift file, no dependencies, no Xcode project — it builds with the sy
 
 In the menu bar: the price, the percentage change in color, and an icon for the current trading session — sunrise for pre-market, sun for regular hours, sunset for after-hours, moon when the market is closed.
 
-In the dropdown: the price to 4 decimals with the absolute change, the instrument name and session, the regular session close and the previous close marked with `◂ база` — "base" (the number the percentage is computed from), the day and 52-week ranges, the timestamps of the last tick and the last poll, and the three latest headlines for the symbol — click one to open it in the browser.
+In the dropdown: the price to 4 decimals with the absolute change, the instrument name and session, the regular session close and the previous close marked with `◂ base` (the number the percentage is computed from), the day and 52-week ranges, the timestamps of the last tick and the last poll, and the three latest headlines for the symbol — click one to open it in the browser.
 
 ## Install
 
@@ -37,18 +37,22 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/local.gpro.widget.plist
 
 ## Configuration
 
+**Symbol** — pick it from the menu (`Symbol: GPRO`, ⌘S), type any Yahoo Finance ticker such as `AAPL` or `BTC-USD`. The choice is remembered; if the ticker does not resolve, the previous one is kept. Defaults to `GPRO`.
+
+**Language** — English or Russian, switchable from the menu. English by default, the choice is remembered.
+
 Environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `TICKER` | `GPRO` | Any Yahoo Finance symbol |
+| `TICKER` | `GPRO` | Initial symbol, used until one is picked from the menu |
 | `REFRESH` | `5` | Poll interval in seconds |
 
 ```bash
 TICKER=AAPL REFRESH=2 open GPRO.app
 ```
 
-For the launch agent, set these through the plist's `EnvironmentVariables` key.
+For the launch agent, set these through the plist's `EnvironmentVariables` key. Both settings live in `UserDefaults` under the `local.gpro.widget` domain.
 
 ## Where the data comes from
 
