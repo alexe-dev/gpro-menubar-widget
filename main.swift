@@ -40,6 +40,7 @@ struct Balance {
     let margin: Double?
     let health: String?
     let cash: Double?
+    let hidden: Bool
     let received: Date
 }
 
@@ -104,6 +105,7 @@ final class BalanceServer {
                 margin: json["margin"] as? Double,
                 health: json["health"] as? String,
                 cash: json["cash"] as? Double,
+                hidden: json["hidden"] as? Bool ?? false,
                 received: Date()))
             self.reply(connection, "HTTP/1.1 200 OK\r\n" + cors + "Content-Length: 2\r\n\r\nok")
         }
@@ -148,6 +150,7 @@ let strings: [String: (String, String)] = [
     "health": ("Health", "Health"),
     "cash": ("Кэш", "Cash"),
     "stale": ("данные устарели", "stale"),
+    "background": ("вкладка в фоне", "tab in background"),
     "unknownSymbol": ("Не нашёл такой тикер — оставил %@", "No such symbol — keeping %@"),
     "quit": ("Выход", "Quit"),
     "error": ("Ошибка загрузки · повтор через %d с", "Fetch failed · retrying in %ds"),
@@ -458,8 +461,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let detail = NSMutableAttributedString()
         detail.append(styled(parts.joined(separator: "     ·     "),
                              size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
-        detail.append(styled("   \(relative(account.received))\(stale ? " · " + t("stale") : "")",
-                             size: 10, color: stale ? .systemOrange : .tertiaryLabelColor))
+        var note = relative(account.received)
+        if account.hidden { note += " · " + t("background") }
+        if stale { note += " · " + t("stale") }
+        detail.append(styled("   " + note, size: 10,
+                             color: (stale || account.hidden) ? .systemOrange : .tertiaryLabelColor))
         balanceDetailItem.attributedTitle = detail
     }
 
@@ -573,9 +579,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 title.append(styled(" " + health, size: 12, weight: .semibold, color: color, mono: true))
             }
 
-            if Date().timeIntervalSince(account.received) > 90 {
+            let ageing = Date().timeIntervalSince(account.received) > 90
+            if ageing || account.hidden {
                 title.append(NSAttributedString(string: " "))
-                title.append(icon("clock.badge.exclamationmark.fill", color: .systemOrange, size: 9))
+                title.append(icon(ageing ? "clock.badge.exclamationmark.fill" : "zzz",
+                                  color: .systemOrange, size: 9))
             }
         }
         item.button?.attributedTitle = title

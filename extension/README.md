@@ -23,6 +23,8 @@ The extension popup shows all five values. The menu bar shows the account total 
 
 ## Limits
 
-The tab has to stay open — minimized or in the background is fine, closed is not. Unchanged numbers are resent every 30 seconds as a heartbeat, so the widget can tell a quiet account from a closed tab; if nothing arrives for 90 seconds it marks the data stale rather than showing a frozen figure as current.
+The tab has to stay open **and visible**. In a background tab the browser throttles timers, Arc may put the tab to sleep, and Trading 212 itself stops repainting — so the numbers freeze at their last value. The extension reports `hidden: true` in that case and the widget marks the figures with a sleep icon instead of pretending they are current, then refreshes the moment the tab regains focus.
+
+Keeping Trading 212 in its own window on a separate desktop works: a window that is merely covered still counts as visible, a minimized or background tab does not. In Arc, also exclude the site from tab sleeping. Unchanged numbers are resent every 30 seconds as a heartbeat, so the widget can tell a quiet account from a closed tab; if nothing arrives for 90 seconds it marks the data stale rather than showing a frozen figure as current.
 
 If Trading 212 renames the test ids and the labels together, reading breaks and the popup says so. Fixing it means updating `TESTIDS` / `LABELS` in `content.js`.

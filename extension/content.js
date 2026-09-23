@@ -118,6 +118,7 @@ function readAccount() {
   const cash = cardValue(TESTIDS.cash, LABELS.cash);
 
   return {
+    hidden: document.visibilityState === "hidden",
     balance,
     currency: currencyOf(currencyNode?.textContent) || currencyOf(amountNode.textContent) || "Kč",
     margin: parseAmount(margin),
@@ -160,5 +161,12 @@ function start() {
     }, 500);
   }).observe(document.body, { childList: true, subtree: true, characterData: true });
   setInterval(tick, POLL_MS);
+
+  // A hidden tab gets its timers throttled and Trading 212 stops repainting, so the
+  // numbers freeze. Report immediately on focus, and say in the payload that the tab
+  // was in the background rather than passing stale figures off as current.
+  document.addEventListener("visibilitychange", tick);
+  window.addEventListener("focus", tick);
+
   tick();
 }
