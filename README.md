@@ -12,7 +12,7 @@ A single Swift file, no dependencies, no Xcode project — it builds with the sy
 
 In the menu bar: the price, the percentage change in color, and an icon for the current trading session — sunrise for pre-market, sun for regular hours, sunset for after-hours, moon when the market is closed.
 
-In the dropdown: the price to 4 decimals with the absolute change, the instrument name and session, the regular session close and the previous close marked with `◂ base` (the number the percentage is computed from), the day and 52-week ranges, the timestamps of the last tick and the last poll, and the three latest headlines for the symbol — click one to open it in the browser.
+In the dropdown: the price to 4 decimals with the absolute change, the instrument name and session, the regular session close and the previous close marked with `◂ base` (the number the percentage is computed from), the day and 52-week ranges, the timestamps of the last tick and the last poll, and the three latest headlines per symbol — click one to open it in the browser.
 
 ## Install
 
@@ -39,7 +39,7 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/local.gpro.widget.plist
 
 **Symbols** — two are tracked at once. Pick them from the menu (`Symbol: GPRO` ⌘S, `Second symbol: KOD` ⌘D) and type any Yahoo Finance ticker such as `AAPL` or `BTC-USD`. Both choices are remembered; if a ticker does not resolve, the previous one is kept. Defaults are `GPRO` and `KOD`.
 
-The menu bar shows both quotes, each prefixed with its ticker. The dropdown gives the primary symbol the full treatment — base marker, ranges, news — and the secondary one a compact block with its price, change, name and ranges. Clicking that block opens it on Yahoo Finance.
+The menu bar shows both quotes in order, primary first. The dropdown gives the primary symbol the full treatment — base marker, ranges, news — and the secondary one a compact block with its price, change, name and ranges. Clicking that block opens it on Yahoo Finance. Each symbol gets its own headlines section.
 
 **Language** — English or Russian, switchable from the menu. English by default, the choice is remembered.
 

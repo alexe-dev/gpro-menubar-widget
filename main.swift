@@ -227,6 +227,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let newsHeader = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var newsItems: [NSMenuItem] = []
     let newsCount = 3
+    let newsHeader2 = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    var newsItems2: [NSMenuItem] = []
     let languageItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var symbolItem = NSMenuItem()
     let balanceItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -271,16 +273,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(balanceDetailItem)
 
         menu.addItem(.separator())
-        newsHeader.isEnabled = true
-        newsHeader.attributedTitle = styled("Новости", size: 11, weight: .semibold, color: .secondaryLabelColor)
-        menu.addItem(newsHeader)
-        for _ in 0..<newsCount {
-            let entry = NSMenuItem(title: "", action: #selector(openNews(_:)), keyEquivalent: "")
-            entry.target = self
-            entry.isEnabled = true
-            entry.isHidden = true
-            newsItems.append(entry)
-            menu.addItem(entry)
+        for (header, storage) in [(newsHeader, 0), (newsHeader2, 1)] {
+            header.isEnabled = true
+            menu.addItem(header)
+            for _ in 0..<newsCount {
+                let entry = NSMenuItem(title: "", action: #selector(openNews(_:)), keyEquivalent: "")
+                entry.target = self
+                entry.isEnabled = true
+                entry.isHidden = true
+                if storage == 0 { newsItems.append(entry) } else { newsItems2.append(entry) }
+                menu.addItem(entry)
+            }
+            if storage == 0 { menu.addItem(.separator()) }
         }
         menu.addItem(.separator())
         symbolItem = NSMenuItem(title: "", action: #selector(changeSymbol), keyEquivalent: "s")
@@ -353,7 +357,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Static menu labels; dynamic lines are translated inside render/renderNews.
     func applyLanguage() {
-        newsHeader.attributedTitle = styled(t("news"), size: 11, weight: .semibold, color: .secondaryLabelColor)
+        newsHeader.attributedTitle = newsTitle(symbol)
+        newsHeader2.attributedTitle = newsTitle(symbol2)
         symbolItem.title = String(format: t("symbol"), symbol)
         symbolItem2.title = String(format: t("symbol2"), symbol2)
         percentItem.title = t("showPercent")
@@ -473,12 +478,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func newsTitle(_ ticker: String) -> NSAttributedString {
+        styled("\(t("news")) · \(ticker)", size: 11, weight: .semibold, color: .secondaryLabelColor)
+    }
+
     func refreshNews() {
-        let url = URL(string: "https://query1.finance.yahoo.com/v1/finance/search?q=\(symbol)&newsCount=\(newsCount)&quotesCount=0")!
+        loadNews(for: symbol) { [weak self] items in self?.renderNews(items, into: self?.newsItems ?? [], header: self?.newsHeader) }
+        loadNews(for: symbol2) { [weak self] items in self?.renderNews(items, into: self?.newsItems2 ?? [], header: self?.newsHeader2) }
+    }
+
+    func loadNews(for ticker: String, _ completion: @escaping ([NewsItem]) -> Void) {
+        let url = URL(string: "https://query1.finance.yahoo.com/v1/finance/search?q=\(ticker)&newsCount=\(newsCount)&quotesCount=0")!
         var req = URLRequest(url: url)
         req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
         req.timeoutInterval = 10
-        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+        URLSession.shared.dataTask(with: req) { data, _, _ in
             guard
                 let data = data,
                 let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -493,13 +507,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     link: link,
                     published: Date(timeIntervalSince1970: entry["providerPublishTime"] as? Double ?? 0))
             }
-            DispatchQueue.main.async { self?.renderNews(items) }
+            DispatchQueue.main.async { completion(items) }
         }.resume()
     }
 
-    func renderNews(_ items: [NewsItem]) {
-        newsHeader.isHidden = items.isEmpty
-        for (index, entry) in newsItems.enumerated() {
+    func renderNews(_ items: [NewsItem], into slots: [NSMenuItem], header: NSMenuItem?) {
+        header?.isHidden = items.isEmpty
+        for (index, entry) in slots.enumerated() {
             guard index < items.count else {
                 entry.isHidden = true
                 continue
@@ -522,7 +536,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // The secondary symbol gets a compact block: price with change, then its ranges.
-    // News and the base marker stay with the primary one.
+    // The base marker stays with the primary one; news is shown for both.
     func renderSecondary(_ quote: Quote?) {
         guard let q = quote ?? lastQuote2 else { return }
         lastQuote2 = q
