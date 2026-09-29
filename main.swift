@@ -572,9 +572,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         balanceDetailItem.attributedTitle = detail
     }
 
-    func quoteSegment(_ ticker: String, _ quote: Quote, accent: NSColor, arrow: String) -> NSAttributedString {
+    func quoteSegment(_ quote: Quote, accent: NSColor, arrow: String) -> NSAttributedString {
         let segment = NSMutableAttributedString()
-        segment.append(styled(ticker + " ", size: 10, weight: .semibold, color: .secondaryLabelColor))
         segment.append(styled(String(format: "%.2f ", quote.price), size: 13, weight: .semibold, mono: true))
         segment.append(styled(String(format: "%@%.2f%%", arrow, abs(quote.changePercent)),
                               size: 12, weight: .semibold, color: accent, mono: true))
@@ -668,15 +667,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let accent = accentColor(up: up)
         let arrow = up ? "▲" : "▼"
 
-        // Title: both quotes, each labelled since two prices side by side would be
-        // ambiguous, then one session mark — both symbols share the same market hours.
+        // Title: both quotes bare, then one session mark — both symbols share the same
+        // market hours. Which price is which is settled by the order, same as in the menu.
         let title = NSMutableAttributedString()
-        title.append(quoteSegment(symbol, q, accent: accent, arrow: arrow))
+        title.append(quoteSegment(q, accent: accent, arrow: arrow))
         if let second = lastQuote2 {
             let up2 = second.changePercent >= 0
             title.append(NSAttributedString(string: "   "))
-            title.append(quoteSegment(symbol2, second,
-                                      accent: accentColor(up: up2), arrow: up2 ? "▲" : "▼"))
+            title.append(quoteSegment(second, accent: accentColor(up: up2), arrow: up2 ? "▲" : "▼"))
         }
         let mark = sessionIcon(q.session)
         title.append(NSAttributedString(string: "  "))
