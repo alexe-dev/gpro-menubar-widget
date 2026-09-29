@@ -10,6 +10,15 @@ var symbol: String {
     }
     set { UserDefaults.standard.set(newValue.uppercased(), forKey: "ticker") }
 }
+// The secondary symbol shares the same resolution order, with its own saved key.
+var symbol2: String {
+    get {
+        UserDefaults.standard.string(forKey: "ticker2")
+            ?? ProcessInfo.processInfo.environment["TICKER2"]
+            ?? "KOD"
+    }
+    set { UserDefaults.standard.set(newValue.uppercased(), forKey: "ticker2") }
+}
 let refreshInterval: TimeInterval = Double(ProcessInfo.processInfo.environment["REFRESH"] ?? "") ?? 5
 
 enum Session: String {
@@ -140,6 +149,7 @@ let strings: [String: (String, String)] = [
     "openWeb": ("Открыть на Yahoo Finance", "Open on Yahoo Finance"),
     "language": ("Язык", "Language"),
     "symbol": ("Тикер: %@", "Symbol: %@"),
+    "symbol2": ("Второй тикер: %@", "Second symbol: %@"),
     "changeSymbol": ("Смена тикера", "Change symbol"),
     "changeSymbolInfo": ("Любой символ Yahoo Finance, например AAPL или BTC-USD.",
                          "Any Yahoo Finance symbol, for example AAPL or BTC-USD."),
@@ -209,6 +219,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var balance: Balance?
     let balancePort: UInt16 = UInt16(ProcessInfo.processInfo.environment["BALANCE_PORT"] ?? "") ?? 47632
     var lastQuote: Quote?
+    let priceItem2 = NSMenuItem(title: "", action: #selector(openWeb2), keyEquivalent: "")
+    let rangeItem2 = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    var lastQuote2: Quote?
+    var symbolItem2 = NSMenuItem()
     var refreshItem = NSMenuItem()
     var webItem = NSMenuItem()
     var quitItem = NSMenuItem()
@@ -223,6 +237,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             $0.isEnabled = true
             menu.addItem($0)
         }
+        menu.addItem(.separator())
+        priceItem2.target = self
+        [priceItem2, rangeItem2].forEach {
+            $0.isEnabled = true
+            menu.addItem($0)
+        }
+        priceItem2.attributedTitle = styled(t("loading"), size: 13, color: .secondaryLabelColor)
+
+        menu.addItem(.separator())
         balanceItem.isEnabled = true
         balanceItem.isHidden = true
         menu.addItem(balanceItem)
@@ -246,6 +269,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         symbolItem = NSMenuItem(title: "", action: #selector(changeSymbol), keyEquivalent: "s")
         symbolItem.target = self
         menu.addItem(symbolItem)
+        symbolItem2 = NSMenuItem(title: "", action: #selector(changeSymbol2), keyEquivalent: "d")
+        symbolItem2.target = self
+        menu.addItem(symbolItem2)
         refreshItem = NSMenuItem(title: "", action: #selector(refresh), keyEquivalent: "r")
         refreshItem.target = self
         menu.addItem(refreshItem)
@@ -299,7 +325,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Lang.current = lang
         sender.menu?.items.forEach { $0.state = ($0.representedObject as? String) == raw ? .on : .off }
         applyLanguage()
-        render(lastQuote)   // redraw what we already have instead of waiting for the next poll
+        if lastQuote != nil { render(lastQuote) }   // redraw what we have, don't wait for the next poll
+        renderSecondary(nil)
         refreshNews()
     }
 
@@ -307,12 +334,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applyLanguage() {
         newsHeader.attributedTitle = styled(t("news"), size: 11, weight: .semibold, color: .secondaryLabelColor)
         symbolItem.title = String(format: t("symbol"), symbol)
+        symbolItem2.title = String(format: t("symbol2"), symbol2)
         refreshItem.title = t("refresh")
         webItem.title = t("openWeb")
         languageItem.title = t("language")
         quitItem.title = t("quit")
         if lastQuote == nil {
             priceItem.attributedTitle = styled(t("loading"), size: 13, color: .secondaryLabelColor)
+        }
+        if lastQuote2 == nil {
+            priceItem2.attributedTitle = styled("\(symbol2)  \(t("loading"))", size: 13, color: .secondaryLabelColor)
         }
     }
 
@@ -340,7 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lastQuote = nil
         applyLanguage()
         item.button?.attributedTitle = styled("\(entered) …", size: 12, color: .secondaryLabelColor)
-        fetch { [weak self] quote in
+        fetch(entered) { [weak self] quote in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if let quote = quote {
@@ -356,6 +387,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    @objc func changeSymbol2() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = t("changeSymbol")
+        alert.informativeText = t("changeSymbolInfo")
+        alert.addButton(withTitle: t("ok"))
+        alert.addButton(withTitle: t("cancel"))
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        field.stringValue = symbol2
+        field.placeholderString = "KOD"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let entered = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !entered.isEmpty, entered != symbol2 else { return }
+
+        let previous = symbol2
+        symbol2 = entered
+        lastQuote2 = nil
+        applyLanguage()
+        fetch(entered) { [weak self] quote in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let quote = quote {
+                    self.renderSecondary(quote)
+                } else {
+                    symbol2 = previous
+                    self.applyLanguage()
+                    let warning = NSAlert()
+                    warning.messageText = String(format: self.t("unknownSymbol"), previous)
+                    warning.runModal()
+                    self.refresh()
+                }
+            }
+        }
+    }
+
+    @objc func openWeb2() {
+        NSWorkspace.shared.open(URL(string: "https://finance.yahoo.com/quote/\(symbol2)")!)
     }
 
     // Instance shim so the closure above can reach the global translator.
@@ -419,6 +493,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // The secondary symbol gets a compact block: price with change, then its ranges.
+    // News and the base marker stay with the primary one.
+    func renderSecondary(_ quote: Quote?) {
+        guard let q = quote ?? lastQuote2 else { return }
+        lastQuote2 = q
+
+        let up = q.changePercent >= 0
+        let accent = accentColor(up: up)
+        let mark = sessionIcon(q.session)
+
+        let line = NSMutableAttributedString()
+        line.append(styled("\(symbol2)  ", size: 12, weight: .semibold, color: .secondaryLabelColor))
+        line.append(styled(String(format: "%.2f %@", q.price, q.currency), size: 15, weight: .semibold, mono: true))
+        line.append(styled(String(format: "   %@%.2f  (%+.2f%%)", up ? "▲" : "▼", abs(q.change), q.changePercent),
+                           size: 12, weight: .medium, color: accent, mono: true))
+        line.append(NSAttributedString(string: "  "))
+        line.append(icon(mark.symbol, color: mark.color, size: 10))
+        priceItem2.attributedTitle = line
+
+        let fmt = DateFormatter()
+        fmt.dateFormat = "HH:mm:ss"
+        rangeItem2.attributedTitle = styled(
+            String(format: "\(q.name)  ·  \(t("day"))  %.2f – %.2f  ·  \(t("week52"))  %.2f – %.2f  ·  \(t("tick")) \(fmt.string(from: q.tickTime))",
+                   q.dayLow, q.dayHigh, q.weekLow, q.weekHigh),
+            size: 11, color: .secondaryLabelColor, mono: true)
+
+        if lastQuote != nil { render(lastQuote) }   // the title carries both quotes
+    }
+
     func renderBalance(_ balance: Balance?) {
         if let balance = balance {
             self.balance = balance
@@ -469,6 +572,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         balanceDetailItem.attributedTitle = detail
     }
 
+    func quoteSegment(_ ticker: String, _ quote: Quote, accent: NSColor, arrow: String) -> NSAttributedString {
+        let segment = NSMutableAttributedString()
+        segment.append(styled(ticker + " ", size: 10, weight: .semibold, color: .secondaryLabelColor))
+        segment.append(styled(String(format: "%.2f ", quote.price), size: 13, weight: .semibold, mono: true))
+        segment.append(styled(String(format: "%@%.2f%%", arrow, abs(quote.changePercent)),
+                              size: 12, weight: .semibold, color: accent, mono: true))
+        return segment
+    }
+
     func grouped(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
@@ -490,12 +602,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func refresh() {
         guard !inFlight else { return }
         inFlight = true
-        fetch { [weak self] quote in
+        fetch(symbol) { [weak self] quote in
             DispatchQueue.main.async {
                 self?.inFlight = false
                 self?.render(quote)
                 self?.renderBalance(nil)
             }
+        }
+        fetch(symbol2) { [weak self] quote in
+            DispatchQueue.main.async { self?.renderSecondary(quote) }
         }
     }
 
@@ -519,6 +634,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return NSAttributedString(attachment: attachment)
     }
 
+    // Muted shades: the system green/red are too loud on a light menu bar,
+    // while dark mode needs them lighter so they don't sink into the background.
+    func accentColor(up: Bool) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            if up {
+                return dark ? NSColor(srgbRed: 0.28, green: 0.72, blue: 0.42, alpha: 1)
+                            : NSColor(srgbRed: 0.10, green: 0.45, blue: 0.24, alpha: 1)
+            }
+            return dark ? NSColor(srgbRed: 0.92, green: 0.40, blue: 0.38, alpha: 1)
+                        : NSColor(srgbRed: 0.62, green: 0.14, blue: 0.13, alpha: 1)
+        }
+    }
+
     func sessionIcon(_ session: Session) -> (symbol: String, color: NSColor) {
         switch session {
         case .pre: return ("sunrise.fill", NSColor(srgbRed: 0.83, green: 0.44, blue: 0.20, alpha: 1))
@@ -536,24 +665,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         lastQuote = q
         let up = q.changePercent >= 0
-        // Muted shades: the system green/red are too loud on a light menu bar,
-        // while dark mode needs them lighter so they don't sink into the background.
-        let accent = NSColor(name: nil) { appearance in
-            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            if up {
-                return dark ? NSColor(srgbRed: 0.28, green: 0.72, blue: 0.42, alpha: 1)
-                            : NSColor(srgbRed: 0.10, green: 0.45, blue: 0.24, alpha: 1)
-            }
-            return dark ? NSColor(srgbRed: 0.92, green: 0.40, blue: 0.38, alpha: 1)
-                        : NSColor(srgbRed: 0.62, green: 0.14, blue: 0.13, alpha: 1)
-        }
+        let accent = accentColor(up: up)
         let arrow = up ? "▲" : "▼"
 
-        // Title: price, colored percentage and a small session mark — the ticker lives in the menu.
+        // Title: both quotes, each labelled since two prices side by side would be
+        // ambiguous, then one session mark — both symbols share the same market hours.
         let title = NSMutableAttributedString()
-        title.append(styled(String(format: "%.2f  ", q.price), size: 13, weight: .semibold, mono: true))
-        title.append(styled(String(format: "%@%.2f%%", arrow, abs(q.changePercent)),
-                            size: 12, weight: .semibold, color: accent, mono: true))
+        title.append(quoteSegment(symbol, q, accent: accent, arrow: arrow))
+        if let second = lastQuote2 {
+            let up2 = second.changePercent >= 0
+            title.append(NSAttributedString(string: "   "))
+            title.append(quoteSegment(symbol2, second,
+                                      accent: accentColor(up: up2), arrow: up2 ? "▲" : "▼"))
+        }
         let mark = sessionIcon(q.session)
         title.append(NSAttributedString(string: "  "))
         title.append(icon(mark.symbol, color: mark.color, size: 10))
@@ -634,8 +758,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             size: 11, color: .secondaryLabelColor, mono: true)
     }
 
-    func fetch(_ completion: @escaping (Quote?) -> Void) {
-        let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(symbol)?interval=1m&range=1d&includePrePost=true")!
+    func fetch(_ ticker: String, _ completion: @escaping (Quote?) -> Void) {
+        let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(ticker)?interval=1m&range=1d&includePrePost=true")!
         var req = URLRequest(url: url)
         req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
         req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
@@ -694,7 +818,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 session: session,
                 regularPrice: regularPrice,
                 previousClose: previousClose,
-                name: meta["longName"] as? String ?? symbol,
+                name: meta["longName"] as? String ?? ticker,
                 currency: meta["currency"] as? String ?? "",
                 dayLow: meta["regularMarketDayLow"] as? Double ?? 0,
                 dayHigh: meta["regularMarketDayHigh"] as? Double ?? 0,

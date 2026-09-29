@@ -37,7 +37,9 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/local.gpro.widget.plist
 
 ## Configuration
 
-**Symbol** — pick it from the menu (`Symbol: GPRO`, ⌘S), type any Yahoo Finance ticker such as `AAPL` or `BTC-USD`. The choice is remembered; if the ticker does not resolve, the previous one is kept. Defaults to `GPRO`.
+**Symbols** — two are tracked at once. Pick them from the menu (`Symbol: GPRO` ⌘S, `Second symbol: KOD` ⌘D) and type any Yahoo Finance ticker such as `AAPL` or `BTC-USD`. Both choices are remembered; if a ticker does not resolve, the previous one is kept. Defaults are `GPRO` and `KOD`.
+
+The menu bar shows both quotes, each prefixed with its ticker. The dropdown gives the primary symbol the full treatment — base marker, ranges, news — and the secondary one a compact block with its price, change, name and ranges. Clicking that block opens it on Yahoo Finance.
 
 **Language** — English or Russian, switchable from the menu. English by default, the choice is remembered.
 
@@ -45,7 +47,8 @@ Environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `TICKER` | `GPRO` | Initial symbol, used until one is picked from the menu |
+| `TICKER` | `GPRO` | Initial primary symbol, used until one is picked from the menu |
+| `TICKER2` | `KOD` | Initial secondary symbol |
 | `REFRESH` | `5` | Poll interval in seconds |
 
 ```bash
