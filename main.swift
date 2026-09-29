@@ -19,6 +19,11 @@ var symbol2: String {
     }
     set { UserDefaults.standard.set(newValue.uppercased(), forKey: "ticker2") }
 }
+// Percentages in the menu bar are off by default: the prices are what gets glanced at.
+var showPercent: Bool {
+    get { UserDefaults.standard.bool(forKey: "showPercent") }
+    set { UserDefaults.standard.set(newValue, forKey: "showPercent") }
+}
 let refreshInterval: TimeInterval = Double(ProcessInfo.processInfo.environment["REFRESH"] ?? "") ?? 5
 
 enum Session: String {
@@ -150,6 +155,7 @@ let strings: [String: (String, String)] = [
     "language": ("Язык", "Language"),
     "symbol": ("Тикер: %@", "Symbol: %@"),
     "symbol2": ("Второй тикер: %@", "Second symbol: %@"),
+    "showPercent": ("Проценты в меню-баре", "Percentages in the menu bar"),
     "changeSymbol": ("Смена тикера", "Change symbol"),
     "changeSymbolInfo": ("Любой символ Yahoo Finance, например AAPL или BTC-USD.",
                          "Any Yahoo Finance symbol, for example AAPL or BTC-USD."),
@@ -223,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let rangeItem2 = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var lastQuote2: Quote?
     var symbolItem2 = NSMenuItem()
+    var percentItem = NSMenuItem()
     var refreshItem = NSMenuItem()
     var webItem = NSMenuItem()
     var quitItem = NSMenuItem()
@@ -272,6 +279,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         symbolItem2 = NSMenuItem(title: "", action: #selector(changeSymbol2), keyEquivalent: "d")
         symbolItem2.target = self
         menu.addItem(symbolItem2)
+        percentItem = NSMenuItem(title: "", action: #selector(togglePercent), keyEquivalent: "p")
+        percentItem.target = self
+        percentItem.state = showPercent ? .on : .off
+        menu.addItem(percentItem)
         refreshItem = NSMenuItem(title: "", action: #selector(refresh), keyEquivalent: "r")
         refreshItem.target = self
         menu.addItem(refreshItem)
@@ -335,6 +346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         newsHeader.attributedTitle = styled(t("news"), size: 11, weight: .semibold, color: .secondaryLabelColor)
         symbolItem.title = String(format: t("symbol"), symbol)
         symbolItem2.title = String(format: t("symbol2"), symbol2)
+        percentItem.title = t("showPercent")
         refreshItem.title = t("refresh")
         webItem.title = t("openWeb")
         languageItem.title = t("language")
@@ -426,6 +438,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    @objc func togglePercent() {
+        showPercent.toggle()
+        percentItem.state = showPercent ? .on : .off
+        if lastQuote != nil { render(lastQuote) }
     }
 
     @objc func openWeb2() {
@@ -574,9 +592,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func quoteSegment(_ quote: Quote, accent: NSColor, arrow: String) -> NSAttributedString {
         let segment = NSMutableAttributedString()
-        segment.append(styled(String(format: "%.2f ", quote.price), size: 13, weight: .semibold, mono: true))
-        segment.append(styled(String(format: "%@%.2f%%", arrow, abs(quote.changePercent)),
-                              size: 12, weight: .semibold, color: accent, mono: true))
+        segment.append(styled(String(format: "%.2f", quote.price), size: 13, weight: .semibold, mono: true))
+        if showPercent {
+            segment.append(styled(String(format: " %@%.2f%%", arrow, abs(quote.changePercent)),
+                                  size: 12, weight: .semibold, color: accent, mono: true))
+        } else {
+            // Without the number the arrow still carries the direction, and costs one glyph.
+            segment.append(styled(" " + arrow, size: 10, weight: .bold, color: accent))
+        }
         return segment
     }
 
