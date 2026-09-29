@@ -62,6 +62,7 @@ struct Balance {
 /// Bound to 127.0.0.1 only: nothing on the network can reach it.
 final class BalanceServer {
     private var listener: NWListener?
+    private var lastLogged = Date.distantPast
     private let onUpdate: (Balance) -> Void
 
     init(onUpdate: @escaping (Balance) -> Void) {
@@ -109,6 +110,15 @@ final class BalanceServer {
                   let value = json["balance"] as? Double else {
                 self.reply(connection, "HTTP/1.1 400 Bad Request\r\n" + cors + "Content-Length: 0\r\n\r\n")
                 return
+            }
+
+            // A heartbeat line once a minute: enough to tell a silent bridge from a widget
+            // that failed to render, without the log growing on every five-second tick.
+            if Date().timeIntervalSince(self.lastLogged) > 60 {
+                self.lastLogged = Date()
+                FileHandle.standardError.write(
+                    "balance: \(value) \(json["currency"] as? String ?? "") hidden=\(json["hidden"] as? Bool ?? false) at \(Date())\n"
+                        .data(using: .utf8)!)
             }
 
             self.onUpdate(Balance(
