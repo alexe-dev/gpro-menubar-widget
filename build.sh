@@ -4,6 +4,6 @@ set -euo pipefail
 cd "$(dirname "$0")"
 APP="${APP_NAME:-GPRO}.app"
 mkdir -p "$APP/Contents/MacOS"
-swiftc -O main.swift -o "$APP/Contents/MacOS/${APP%.app}"
+swiftc -O main.swift dashboard.swift settings.swift -o "$APP/Contents/MacOS/${APP%.app}"
 codesign --force --sign - "$APP"
 echo "Built: $APP"
