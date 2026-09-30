@@ -31,15 +31,19 @@ var takeProfit: [String: Double] {
     set { UserDefaults.standard.set(newValue, forKey: "takeProfit") }
 }
 
-// Money put in minus money taken out. A CFD export only sees the CFD side of the
-// account, so this can be set by hand to the figure the platform's History screen shows.
-var netDeposits: Double? {
-    get { UserDefaults.standard.object(forKey: "netDeposits") as? Double }
-    set {
-        if let value = newValue { UserDefaults.standard.set(value, forKey: "netDeposits") }
-        else { UserDefaults.standard.removeObject(forKey: "netDeposits") }
-    }
+// Money in and out, entered by hand from the platform's History screen: a CFD export
+// does not see funds moved in from the Invest side, so it cannot answer this.
+var depositsTotal: Double {
+    get { UserDefaults.standard.double(forKey: "depositsTotal") }
+    set { UserDefaults.standard.set(newValue, forKey: "depositsTotal") }
 }
+
+var withdrawalsTotal: Double {
+    get { UserDefaults.standard.double(forKey: "withdrawalsTotal") }
+    set { UserDefaults.standard.set(newValue, forKey: "withdrawalsTotal") }
+}
+
+var netDeposits: Double { depositsTotal - withdrawalsTotal }
 
 let fxFeeRate = 0.005   // Trading 212 charges 0.5% of the result as an FX fee
 let refreshInterval: TimeInterval = Double(ProcessInfo.processInfo.environment["REFRESH"] ?? "") ?? 5
@@ -86,7 +90,6 @@ struct Position {
 struct Portfolio {
     let accountCurrency: String
     let cashFallback: Double
-    let netDeposits: Double
     let positions: [Position]
     let generated: String
 
@@ -135,7 +138,6 @@ struct Portfolio {
         return Portfolio(
             accountCurrency: json["accountCurrency"] as? String ?? "CZK",
             cashFallback: json["cashFallback"] as? Double ?? 0,
-            netDeposits: json["netDeposits"] as? Double ?? 0,
             positions: positions,
             generated: json["generated"] as? String ?? "")
     }
@@ -315,9 +317,11 @@ let strings: [String: (String, String)] = [
     "upside": ("к текущему", "vs now"),
     "invested": ("Внесено", "Net in"),
     "lifetime": ("Итого", "Overall"),
-    "setDeposits": ("Внесено за всё время", "Net deposits"),
-    "setDepositsInfo": ("Депозиты минус выводы, как на экране History. Пусто — взять из CSV.",
-                        "Deposits minus withdrawals, as the History screen shows. Empty falls back to the CSV."),
+    "setDeposits": ("Депозиты и выводы", "Deposits and withdrawals"),
+    "setDepositsInfo": ("Суммы с экрана History. Экспорт CFD их не знает: переводы с Invest в нём не видны.",
+                        "The totals from the History screen. A CFD export cannot see funds moved in from Invest."),
+    "deposits": ("Депозиты", "Deposits"),
+    "withdrawals": ("Выводы", "Withdrawals"),
     "stale": ("данные устарели", "stale"),
     "background": ("вкладка в фоне", "tab in background"),
     "free": ("Свободно", "Free funds"),
@@ -667,17 +671,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: t("ok"))
         alert.addButton(withTitle: t("cancel"))
 
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
-        if let value = netDeposits { field.stringValue = String(format: "%.2f", value) }
-        field.placeholderString = portfolio.map { String(format: "%.2f", $0.netDeposits) } ?? "0"
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
+        let form = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 56))
+        let rows: [(String, Double)] = [(t("deposits"), depositsTotal), (t("withdrawals"), withdrawalsTotal)]
+        var fields: [NSTextField] = []
+        for (index, row) in rows.enumerated() {
+            let y = 30 - CGFloat(index) * 30
+            let label = NSTextField(labelWithString: row.0)
+            label.frame = NSRect(x: 0, y: y + 3, width: 110, height: 20)
+            let field = NSTextField(frame: NSRect(x: 116, y: y, width: 150, height: 22))
+            if row.1 != 0 { field.stringValue = String(format: "%.2f", abs(row.1)) }
+            field.placeholderString = "0.00"
+            fields.append(field)
+            form.addSubview(label)
+            form.addSubview(field)
+        }
+        alert.accessoryView = form
+        alert.window.initialFirstResponder = fields[0]
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let text = field.stringValue.trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: ",", with: ".")
-        netDeposits = text.isEmpty ? nil : Double(text)
+        func amount(_ field: NSTextField) -> Double {
+            let text = field.stringValue
+                .replacingOccurrences(of: " ", with: "")
+                .replacingOccurrences(of: "\u{00a0}", with: "")
+                .replacingOccurrences(of: ",", with: ".")
+            return abs(Double(text) ?? 0)
+        }
+        depositsTotal = amount(fields[0])
+        withdrawalsTotal = amount(fields[1])
         recompute()
     }
 
@@ -994,7 +1014,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Equity against the money actually put in: what the account made or lost overall,
     // realised trades included, rather than just on the positions open right now.
     func renderLifetime(_ computed: Computed) {
-        let invested = netDeposits ?? portfolio?.netDeposits ?? 0
+        let invested = netDeposits
         guard invested != 0 else {
             lifetimeItem.isHidden = true
             return
@@ -1060,7 +1080,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    scenario.health, grouped(scenario.freeFunds), grouped(max(delta, 0))),
                             size: 11, color: .secondaryLabelColor, mono: true))
 
-        let invested = netDeposits ?? portfolio?.netDeposits ?? 0
+        let invested = netDeposits
         if invested != 0 {
             let overall = scenario.equity - invested
             let overallUp = overall >= 0
