@@ -24,6 +24,13 @@ var showPercent: Bool {
     get { UserDefaults.standard.bool(forKey: "showPercent") }
     set { UserDefaults.standard.set(newValue, forKey: "showPercent") }
 }
+// Take-profit targets per symbol, entered as the price a position would close at —
+// the bid for a long, which is what Trading 212's own TP order takes.
+var takeProfit: [String: Double] {
+    get { UserDefaults.standard.dictionary(forKey: "takeProfit") as? [String: Double] ?? [:] }
+    set { UserDefaults.standard.set(newValue, forKey: "takeProfit") }
+}
+
 let fxFeeRate = 0.005   // Trading 212 charges 0.5% of the result as an FX fee
 let refreshInterval: TimeInterval = Double(ProcessInfo.processInfo.environment["REFRESH"] ?? "") ?? 5
 
@@ -132,6 +139,17 @@ struct Holding {
     let margin: Double
 }
 
+/// The account as it would stand if every target were hit.
+struct Scenario {
+    let equity: Double
+    let result: Double
+    let margin: Double
+    let health: Double
+    let freeFunds: Double
+    let holdings: [Holding]
+    let covered: Int          // positions with a target set
+}
+
 struct Computed {
     let unrealized: Double
     let equity: Double
@@ -142,6 +160,7 @@ struct Computed {
     let priced: Int          // positions we had a price for
     let total: Int
     let holdings: [Holding]
+    let scenario: Scenario?
 }
 
 struct Balance {
@@ -276,6 +295,12 @@ let strings: [String: (String, String)] = [
     "value": ("Стоимость", "Value"),
     "result": ("Результат", "Result"),
     "lots": ("поз.", "pos."),
+    "tp": ("Цели (TP)", "Targets (TP)"),
+    "tpSetTitle": ("Цены целей", "Target prices"),
+    "tpSetInfo": ("Цена закрытия позиции: для лонга это bid. Пусто — без цели.",
+                  "The price a position closes at — the bid for a long. Empty means no target."),
+    "atTarget": ("При целях", "At targets"),
+    "upside": ("прирост", "upside"),
     "stale": ("данные устарели", "stale"),
     "background": ("вкладка в фоне", "tab in background"),
     "free": ("Свободно", "Free funds"),
@@ -322,10 +347,9 @@ struct NewsItem {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     var timer: Timer?
-    let priceItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    let sessionItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    let regularItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    let rangeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    var quotePriceItems: [NSMenuItem] = []
+    var quoteNameItems: [NSMenuItem] = []
+    var quoteStatsItems: [NSMenuItem] = []
     let updatedItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var inFlight = false
     var newsTimer: Timer?
@@ -347,10 +371,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var lastComputeLog = Date.distantPast
     var holdingItems: [NSMenuItem] = []
     let holdingSlots = 4
+    let tpHeader = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    var tpItems: [NSMenuItem] = []
+    let tpTotalItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    var tpMenuItem = NSMenuItem()
     let balancePort: UInt16 = UInt16(ProcessInfo.processInfo.environment["BALANCE_PORT"] ?? "") ?? 47632
     var lastQuote: Quote?
-    let priceItem2 = NSMenuItem(title: "", action: #selector(openWeb2), keyEquivalent: "")
-    let rangeItem2 = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var lastQuote2: Quote?
     var symbolItem2 = NSMenuItem()
     var percentItem = NSMenuItem()
@@ -360,22 +386,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         item.button?.title = "\(symbol) …"
-        priceItem.attributedTitle = styled(t("loading"), size: 13, color: .secondaryLabelColor)
 
         let menu = NSMenu()
         menu.autoenablesItems = false
-        [priceItem, sessionItem, regularItem, rangeItem, updatedItem].forEach {
-            $0.isEnabled = true
-            menu.addItem($0)
+        for slot in 0..<2 {
+            let price = NSMenuItem(title: "", action: slot == 0 ? #selector(openWeb) : #selector(openWeb2),
+                                   keyEquivalent: "")
+            price.target = self
+            let name = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            let stats = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            [price, name, stats].forEach {
+                $0.isEnabled = true
+                menu.addItem($0)
+            }
+            quotePriceItems.append(price)
+            quoteNameItems.append(name)
+            quoteStatsItems.append(stats)
+            if slot == 0 { menu.addItem(.separator()) }
         }
-        menu.addItem(.separator())
-        priceItem2.target = self
-        [priceItem2, rangeItem2].forEach {
-            $0.isEnabled = true
-            menu.addItem($0)
-        }
-        priceItem2.attributedTitle = styled(t("loading"), size: 13, color: .secondaryLabelColor)
-
+        updatedItem.isEnabled = true
+        menu.addItem(updatedItem)
+        quotePriceItems[0].attributedTitle = styled("\(symbol)  \(t("loading"))", size: 13, color: .secondaryLabelColor)
+        quotePriceItems[1].attributedTitle = styled("\(symbol2)  \(t("loading"))", size: 13, color: .secondaryLabelColor)
         menu.addItem(.separator())
         balanceItem.isEnabled = true
         balanceItem.isHidden = true
@@ -390,6 +422,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             holdingItems.append(entry)
             menu.addItem(entry)
         }
+
+        tpHeader.isEnabled = true
+        tpHeader.isHidden = true
+        menu.addItem(tpHeader)
+        for _ in 0..<holdingSlots {
+            let entry = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            entry.isEnabled = true
+            entry.isHidden = true
+            tpItems.append(entry)
+            menu.addItem(entry)
+        }
+        tpTotalItem.isEnabled = true
+        tpTotalItem.isHidden = true
+        menu.addItem(tpTotalItem)
 
         menu.addItem(.separator())
         for (header, storage) in [(newsHeader, 0), (newsHeader2, 1)] {
@@ -412,6 +458,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         symbolItem2 = NSMenuItem(title: "", action: #selector(changeSymbol2), keyEquivalent: "d")
         symbolItem2.target = self
         menu.addItem(symbolItem2)
+        tpMenuItem = NSMenuItem(title: "", action: #selector(editTargets), keyEquivalent: "t")
+        tpMenuItem.target = self
+        menu.addItem(tpMenuItem)
         percentItem = NSMenuItem(title: "", action: #selector(togglePercent), keyEquivalent: "p")
         percentItem.target = self
         percentItem.state = showPercent ? .on : .off
@@ -490,15 +539,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         symbolItem.title = String(format: t("symbol"), symbol)
         symbolItem2.title = String(format: t("symbol2"), symbol2)
         percentItem.title = t("showPercent")
+        tpMenuItem.title = t("tp")
         refreshItem.title = t("refresh")
         webItem.title = t("openWeb")
         languageItem.title = t("language")
         quitItem.title = t("quit")
-        if lastQuote == nil {
-            priceItem.attributedTitle = styled(t("loading"), size: 13, color: .secondaryLabelColor)
+        if lastQuote == nil, !quotePriceItems.isEmpty {
+            quotePriceItems[0].attributedTitle = styled("\(symbol)  \(t("loading"))", size: 13, color: .secondaryLabelColor)
         }
-        if lastQuote2 == nil {
-            priceItem2.attributedTitle = styled("\(symbol2)  \(t("loading"))", size: 13, color: .secondaryLabelColor)
+        if lastQuote2 == nil, quotePriceItems.count > 1 {
+            quotePriceItems[1].attributedTitle = styled("\(symbol2)  \(t("loading"))", size: 13, color: .secondaryLabelColor)
         }
     }
 
@@ -581,6 +631,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    @objc func editTargets() {
+        guard let portfolio = portfolio else { return }
+        NSApp.activate(ignoringOtherApps: true)
+
+        let alert = NSAlert()
+        alert.messageText = t("tpSetTitle")
+        alert.informativeText = t("tpSetInfo")
+        alert.addButton(withTitle: t("ok"))
+        alert.addButton(withTitle: t("cancel"))
+
+        let rowHeight: CGFloat = 26
+        let form = NSView(frame: NSRect(x: 0, y: 0, width: 260,
+                                        height: rowHeight * CGFloat(portfolio.positions.count)))
+        var fields: [String: NSTextField] = [:]
+        let saved = takeProfit
+        for (index, position) in portfolio.positions.enumerated() {
+            let y = form.frame.height - rowHeight * CGFloat(index + 1)
+            let label = NSTextField(labelWithString: position.symbol)
+            label.frame = NSRect(x: 0, y: y + 3, width: 70, height: 20)
+            let field = NSTextField(frame: NSRect(x: 76, y: y, width: 120, height: 22))
+            field.placeholderString = String(format: "%.2f", position.avgPrice)
+            if let target = saved[position.symbol] { field.stringValue = String(format: "%g", target) }
+            fields[position.symbol] = field
+            form.addSubview(label)
+            form.addSubview(field)
+        }
+        alert.accessoryView = form
+        alert.window.initialFirstResponder = fields[portfolio.positions[0].symbol]
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        var targets: [String: Double] = [:]
+        for (symbol, field) in fields {
+            let text = field.stringValue.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
+            if let value = Double(text), value > 0 { targets[symbol] = value }
+        }
+        takeProfit = targets
+        recompute()
     }
 
     @objc func togglePercent() {
@@ -668,27 +758,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func renderSecondary(_ quote: Quote?) {
         guard let q = quote ?? lastQuote2 else { return }
         lastQuote2 = q
-
-        let up = q.changePercent >= 0
-        let accent = accentColor(up: up)
-        let mark = sessionIcon(q.session)
-
-        let line = NSMutableAttributedString()
-        line.append(styled("\(symbol2)  ", size: 12, weight: .semibold, color: .secondaryLabelColor))
-        line.append(styled(String(format: "%.2f %@", q.price, q.currency), size: 15, weight: .semibold, mono: true))
-        line.append(styled(String(format: "   %@%.2f  (%+.2f%%)", up ? "▲" : "▼", abs(q.change), q.changePercent),
-                           size: 12, weight: .medium, color: accent, mono: true))
-        line.append(NSAttributedString(string: "  "))
-        line.append(icon(mark.symbol, color: mark.color, size: 10))
-        priceItem2.attributedTitle = line
-
-        let fmt = DateFormatter()
-        fmt.dateFormat = "HH:mm:ss"
-        rangeItem2.attributedTitle = styled(
-            String(format: "\(q.name)  ·  \(t("day"))  %.2f – %.2f  ·  \(t("week52"))  %.2f – %.2f  ·  \(t("tick")) \(fmt.string(from: q.tickTime))",
-                   q.dayLow, q.dayHigh, q.weekLow, q.weekHigh),
-            size: 11, color: .secondaryLabelColor, mono: true)
-
+        renderQuoteBlock(ticker: symbol2, quote: q, slot: 1)
         if lastQuote != nil { render(lastQuote) }   // the title carries both quotes
     }
 
@@ -729,6 +799,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func recompute() {
         guard let portfolio = portfolio else { return }
 
+        let cashNow = UserDefaults.standard.object(forKey: "cashCalibrated") as? Double ?? portfolio.cashFallback
         var unrealized = 0.0, notional = 0.0, margin = 0.0, priced = 0
         var holdings: [Holding] = []
         for position in portfolio.positions {
@@ -751,10 +822,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard priced == portfolio.positions.count, margin > 0 else { return }
 
+        // The same arithmetic at the target prices; a symbol without a target keeps its
+        // current price, so a partly filled set of targets still answers "and then what".
+        let targets = takeProfit
+        var scenario: Scenario?
+        if !targets.isEmpty {
+            var sResult = 0.0, sMargin = 0.0, sHoldings: [Holding] = []
+            for position in portfolio.positions {
+                guard let price = priceCache[position.symbol],
+                      let fx = rate(from: position.currency) else { continue }
+                let closing = targets[position.symbol] ?? position.closingPrice(from: price)
+                let marginPrice = targets[position.symbol].map { $0 + position.sign * position.spread }
+                    ?? position.marginPrice(from: price)
+                let pnl = position.sign * position.units * (closing - position.avgPrice) * fx
+                let result = pnl - fxFeeRate * abs(pnl)
+                let positionMargin = position.units * marginPrice * fx / position.leverage
+                sResult += result
+                sMargin += positionMargin
+                sHoldings.append(Holding(symbol: position.symbol, lots: position.lots, result: result,
+                                         value: position.units * closing * fx, margin: positionMargin))
+            }
+            let sEquity = cashNow + sResult
+            let sHealth = sEquity < sMargin ? sEquity / sMargin * 50 : sEquity / (sEquity + sMargin) * 100
+            scenario = Scenario(equity: sEquity, result: sResult, margin: sMargin, health: sHealth,
+                                freeFunds: max(sEquity - sMargin, 0), holdings: sHoldings,
+                                covered: targets.count)
+        }
+
         // Cash is calibrated against the platform's own equity whenever a live reading
         // arrives; between readings it only moves with realised events, which are rare.
-        let cash = UserDefaults.standard.object(forKey: "cashCalibrated") as? Double ?? portfolio.cashFallback
-        let equity = cash + unrealized
+        let equity = cashNow + unrealized
 
         // Trading 212's account status: below 50% it is measured against the margin alone,
         // above it against funds plus margin. Both branches meet at 50%.
@@ -764,7 +861,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             margin: margin, health: health,
                             freeFunds: max(equity - margin, 0),
                             priced: priced, total: portfolio.positions.count,
-                            holdings: holdings)
+                            holdings: holdings, scenario: scenario)
         if Date().timeIntervalSince(lastComputeLog) > 60 {
             lastComputeLog = Date()
             FileHandle.standardError.write(
@@ -841,7 +938,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         balanceDetailItem.attributedTitle = detail
 
         renderHoldings(computed.holdings)
+        renderScenario(computed)
         if lastQuote != nil { render(lastQuote) }   // the title carries equity and health
+    }
+
+    func renderScenario(_ computed: Computed) {
+        guard let scenario = computed.scenario else {
+            tpHeader.isHidden = true
+            tpItems.forEach { $0.isHidden = true }
+            tpTotalItem.isHidden = true
+            return
+        }
+        let currency = portfolio?.accountCurrency ?? ""
+        tpHeader.isHidden = false
+        tpHeader.attributedTitle = styled(t("atTarget"), size: 11, weight: .semibold, color: .secondaryLabelColor)
+
+        let targets = takeProfit
+        for (index, entry) in tpItems.enumerated() {
+            guard index < scenario.holdings.count else {
+                entry.isHidden = true
+                continue
+            }
+            let holding = scenario.holdings[index]
+            entry.isHidden = false
+            let up = holding.result >= 0
+            let line = NSMutableAttributedString()
+            line.append(styled(String(format: "%-6@", holding.symbol as NSString),
+                               size: 12, weight: .semibold, mono: true))
+            let target = targets[holding.symbol].map { String(format: "%g", $0) } ?? "—"
+            line.append(styled(String(format: "%8@   ", target as NSString),
+                               size: 11, color: .secondaryLabelColor, mono: true))
+            line.append(styled(String(format: "%@%@", up ? "+" : "−", grouped(abs(holding.result))),
+                               size: 12, weight: .semibold, color: accentColor(up: up), mono: true))
+            entry.attributedTitle = line
+        }
+
+        tpTotalItem.isHidden = false
+        let up = scenario.result >= 0
+        let delta = scenario.equity - computed.equity
+        let total = NSMutableAttributedString()
+        total.append(icon("target", color: .secondaryLabelColor, size: 11))
+        total.append(styled(String(format: "  %@  %@ %@", t("balance"), grouped(scenario.equity), currency),
+                            size: 13, weight: .semibold, mono: true))
+        total.append(styled(String(format: "   %@%@", up ? "+" : "−", grouped(abs(scenario.result))),
+                            size: 12, weight: .medium, color: accentColor(up: up), mono: true))
+        total.append(styled(String(format: "   \(t("health")) %.0f%%   \(t("cash")) %@   \(t("upside")) +%@",
+                                   scenario.health, grouped(scenario.freeFunds), grouped(max(delta, 0))),
+                            size: 11, color: .secondaryLabelColor, mono: true))
+        tpTotalItem.attributedTitle = total
     }
 
     // Per-symbol totals, the same three rows the platform shows under each instrument.
@@ -909,6 +1053,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                              color: computed == nil ? .systemOrange : .tertiaryLabelColor))
         balanceDetailItem.attributedTitle = detail
         holdingItems.forEach { $0.isHidden = true }
+        tpItems.forEach { $0.isHidden = true }
+        tpHeader.isHidden = true
+        tpTotalItem.isHidden = true
     }
 
     func quoteSegment(_ quote: Quote, accent: NSColor, arrow: String) -> NSAttributedString {
@@ -1065,11 +1212,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         item.button?.attributedTitle = title
 
+        renderQuoteBlock(ticker: symbol, quote: q, slot: 0)
+    }
+
+    // One shape for both symbols: price line, instrument line, then the numbers.
+    // The base marker only appears on a symbol whose session drives the percentage.
+    func renderQuoteBlock(ticker: String, quote q: Quote, slot: Int) {
+        let up = q.changePercent >= 0
+        let accent = accentColor(up: up)
+        let mark = sessionIcon(q.session)
+
         let headline = NSMutableAttributedString()
-        headline.append(styled(String(format: "%.4f %@", q.price, q.currency), size: 17, weight: .semibold, mono: true))
-        headline.append(styled(String(format: "   %@%.4f  (%+.2f%%)", arrow, abs(q.change), q.changePercent),
-                               size: 13, weight: .medium, color: accent, mono: true))
-        priceItem.attributedTitle = headline
+        headline.append(styled(ticker + "  ", size: 11, weight: .semibold, color: .secondaryLabelColor))
+        headline.append(styled(String(format: "%.4f %@", q.price, q.currency), size: 16, weight: .semibold, mono: true))
+        headline.append(styled(String(format: "   %@%.4f  (%+.2f%%)", up ? "▲" : "▼", abs(q.change), q.changePercent),
+                               size: 12, weight: .medium, color: accent, mono: true))
+        headline.append(NSAttributedString(string: "  "))
+        headline.append(icon(mark.symbol, color: mark.color, size: 10))
+        quotePriceItems[slot].attributedTitle = headline
 
         let sessionName: String
         switch q.session {
@@ -1078,37 +1238,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .post: sessionName = t("post")
         case .closed: sessionName = t("closed")
         }
-        let sessionLine = NSMutableAttributedString()
-        sessionLine.append(icon(mark.symbol, color: mark.color, size: 11))
-        sessionLine.append(styled("  \(sessionName)  ·  \(q.name)", size: 12, weight: .semibold))
-        sessionItem.attributedTitle = sessionLine
+        quoteNameItems[slot].attributedTitle = styled("\(sessionName)  ·  \(q.name)",
+                                                      size: 12, weight: .medium, color: .secondaryLabelColor)
 
-        // During regular hours regularMarketPrice is the live price rather than a close,
-        // and the base shifts: extended hours count from the close, regular hours from the previous close.
+        // Outside regular hours the percentage runs from the session close, inside it from
+        // the previous close; the base marker follows.
         let extended = q.session == .pre || q.session == .post
-        let regularLabel = extended ? t("regularClose") : t("regularLive")
-        let baseMark = t("base")
-        let baseColor = NSColor.secondaryLabelColor
-        let baseLine = NSMutableAttributedString()
-        baseLine.append(styled(String(format: "%@  %.2f", regularLabel, q.regularPrice),
-                               size: 12, weight: extended ? .semibold : .medium, mono: true))
-        if extended { baseLine.append(styled(" " + baseMark, size: 10, color: baseColor)) }
-        baseLine.append(styled("          ", size: 12, mono: true))
-        baseLine.append(styled(String(format: "Пред. закрытие  %.2f", q.previousClose),
-                               size: 12, weight: extended ? .medium : .semibold, mono: true))
-        if !extended { baseLine.append(styled(" " + baseMark, size: 10, color: baseColor)) }
-        regularItem.attributedTitle = baseLine
-
-        rangeItem.attributedTitle = styled(
-            String(format: "\(t("day"))  %.2f – %.2f          \(t("week52"))  %.2f – %.2f",
-                   q.dayLow, q.dayHigh, q.weekLow, q.weekHigh),
-            size: 12, weight: .medium, mono: true)
+        let stats = NSMutableAttributedString()
+        stats.append(styled(String(format: "%@ %.2f", extended ? t("regularClose") : t("regularLive"), q.regularPrice),
+                            size: 11, weight: extended ? .semibold : .regular, mono: true))
+        if extended { stats.append(styled(" " + t("base"), size: 9, color: .tertiaryLabelColor)) }
+        stats.append(styled(String(format: "  ·  %@ %.2f", t("prevClose"), q.previousClose),
+                            size: 11, weight: extended ? .regular : .semibold, mono: true))
+        if !extended { stats.append(styled(" " + t("base"), size: 9, color: .tertiaryLabelColor)) }
 
         let fmt = DateFormatter()
         fmt.dateFormat = "HH:mm:ss"
-        updatedItem.attributedTitle = styled(
-            "\(t("tick")) \(fmt.string(from: q.tickTime))   ·   \(t("poll")) \(fmt.string(from: Date()))",
-            size: 11, color: .secondaryLabelColor, mono: true)
+        stats.append(styled(String(format: "  ·  %@ %.2f – %.2f  ·  %@ %.2f – %.2f  ·  %@ %@",
+                                   t("day"), q.dayLow, q.dayHigh,
+                                   t("week52"), q.weekLow, q.weekHigh,
+                                   t("tick"), fmt.string(from: q.tickTime) as NSString),
+                            size: 11, mono: true))
+        quoteStatsItems[slot].attributedTitle = NSAttributedString(
+            attributedString: applyColor(.secondaryLabelColor, to: stats))
+    }
+
+    // The stats line mixes weights but keeps one color.
+    func applyColor(_ color: NSColor, to text: NSAttributedString) -> NSAttributedString {
+        let copy = NSMutableAttributedString(attributedString: text)
+        copy.addAttribute(.foregroundColor, value: color, range: NSRange(location: 0, length: copy.length))
+        return copy
     }
 
     func fetch(_ ticker: String, _ completion: @escaping (Quote?) -> Void) {
