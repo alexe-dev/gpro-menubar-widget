@@ -66,8 +66,27 @@ struct Portfolio {
     let generated: String
 
     static func load() -> Portfolio? {
-        let path = UserDefaults.standard.string(forKey: "positionsPath")
-            ?? Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("positions.json").path
+        // Run from a bundle, from a build directory or from launchd, the file sits in a
+        // different place relative to the executable each time, so all of them are tried.
+        let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        let candidates: [String] = ([
+            UserDefaults.standard.string(forKey: "positionsPath"),
+            Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("positions.json").path,
+            executable.deletingLastPathComponent().appendingPathComponent("positions.json").path(percentEncoded: false),
+            // …/GPRO.app/Contents/MacOS/GPRO → …/positions.json
+            executable.deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("positions.json").path(percentEncoded: false),
+            NSHomeDirectory() + "/.config/gpro-widget/positions.json",
+        ] as [String?]).compactMap { $0 }
+
+        guard let path = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+            FileHandle.standardError.write(
+                "positions: not found, tried \(candidates.joined(separator: ", "))\n".data(using: .utf8)!)
+            return nil
+        }
+        FileHandle.standardError.write("positions: \(path)\n".data(using: .utf8)!)
+
         guard let data = FileManager.default.contents(atPath: path),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let raw = json["positions"] as? [[String: Any]] else { return nil }
