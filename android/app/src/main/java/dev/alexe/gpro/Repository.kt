@@ -24,9 +24,21 @@ object Repository {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_GIST, DEFAULT_GIST)
             ?: DEFAULT_GIST
 
+    /// Pasting on a phone picks up newlines and stray spaces. A bare gist id is kept as
+    /// is — Api.sync resolves it through the API rather than the raw CDN.
+    fun normalise(url: String): String {
+        val cleaned = url.filterNot { it.isWhitespace() }
+        return when {
+            cleaned.isEmpty() -> ""
+            cleaned.matches(Regex("[0-9a-f]{20,40}")) -> cleaned
+            cleaned.startsWith("http://") || cleaned.startsWith("https://") -> cleaned
+            else -> "https://$cleaned"
+        }
+    }
+
     fun setGistUrl(context: Context, url: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY_GIST, url.trim()).apply()
+            .putString(KEY_GIST, normalise(url)).apply()
     }
 
     suspend fun load(context: Context): Snapshot = withContext(Dispatchers.IO) {

@@ -72,10 +72,10 @@ def main():
         return
 
     gist_id = publish(data)
-    raw = subprocess.run(["gh", "api", f"gists/{gist_id}", "--jq", f'.files["{GIST_FILE}"].raw_url'],
-                         capture_output=True, text=True).stdout.strip()
-    print(f"gist {gist_id}")
-    print(f"raw  {raw}")
+    # The id is what the phone wants: it reads the gist through the API, where a raw CDN
+    # edge cannot serve a stale 404, and the id survives every republish.
+    print(f"gist id  {gist_id}")
+    print(f"page     https://gist.github.com/{gist_id}")
 
 
 if __name__ == "__main__":
