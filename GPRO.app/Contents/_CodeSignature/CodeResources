@@ -3,9 +3,22 @@
 <plist version="1.0">
 <dict>
 	<key>files</key>
-	<dict/>
+	<dict>
+		<key>Resources/GPRO.icns</key>
+		<data>
+		GwyDr7ESVo9OpkihnSwvpIvz5TE=
+		</data>
+	</dict>
 	<key>files2</key>
-	<dict/>
+	<dict>
+		<key>Resources/GPRO.icns</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			AK+CbZT24UMTqYQ5K9V1oD2Z+NGLrgxj0MUp+q/z648=
+			</data>
+		</dict>
+	</dict>
 	<key>rules</key>
 	<dict>
 		<key>^Resources/</key>

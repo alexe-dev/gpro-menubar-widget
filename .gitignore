@@ -1,3 +1,5 @@
 GPRO.app/Contents/MacOS/
 *.o
 .DS_Store
+icon.iconset/
+*.dmg
