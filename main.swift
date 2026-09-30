@@ -676,7 +676,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showDashboard() {
         if let window = dashboardWindow {
-            NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             return
@@ -691,11 +690,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.contentViewController = NSHostingController(rootView: DashboardView())
         window.center()
         window.isReleasedWhenClosed = false
-        window.delegate = self
         dashboardWindow = window
 
-        // The app has no Dock icon while only the menu bar is up; a window needs one.
-        NSApp.setActivationPolicy(.regular)
+        // Stays an accessory app: launchd runs the executable directly rather than through
+        // LaunchServices, and a Dock tile for such a process renders with a prohibitory badge.
+        // An accessory app's windows still take focus and keyboard input.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         pushDashboard()
@@ -1511,13 +1510,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 weekHigh: meta["fiftyTwoWeekHigh"] as? Double ?? 0,
                 tickTime: Date(timeIntervalSince1970: lastStamp)))
         }.resume()
-    }
-}
-
-extension AppDelegate: NSWindowDelegate {
-    func windowWillClose(_ notification: Notification) {
-        // Back to a menu-bar-only app once the window is gone.
-        NSApp.setActivationPolicy(.accessory)
     }
 }
 
