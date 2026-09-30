@@ -1354,13 +1354,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // since that is the number worth glancing at; the equity itself lives in the menu.
         let invested = netDeposits
         let equity = platformLive ? balance?.value : (computed?.equity ?? balance?.value)
-        let headline = (invested != 0 && !platformLive) ? computed.map { $0.equity - invested } : equity
+        // Same meaning all day: whichever source is live, the title shows equity minus
+        // the money put in. A field that silently changes meaning at the open is worse
+        // than either figure on its own.
+        let headline = invested != 0 ? equity.map { $0 - invested } : equity
         let healthPercent = platformLive
             ? balance?.health
             : (computed.map { String(format: "%.0f%%", $0.health) } ?? balance?.health)
         if let headline = headline {
             // The overall figure is signed and coloured; a bare equity is not.
-            let overall = invested != 0 && !platformLive
+            let overall = invested != 0
             title.append(NSAttributedString(string: "  "))
             title.append(styled(String(format: overall ? "%+.0f" : "%.0f", headline / 1000),
                                 size: 13, weight: .semibold,
