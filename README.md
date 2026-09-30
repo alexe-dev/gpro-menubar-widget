@@ -119,6 +119,12 @@ Cash is only re-pinned during the regular session. Outside it the platform's num
 
 Accuracy against the platform, measured per symbol on a closed market: value, margin, p/l, FX fee and result all land within **0.03%** of the figures Trading 212 shows. The FX rate it uses turns out to be the market one — `USDCZK=X` reproduced its totals to four digits.
 
+## Overall profit
+
+Below the account line sits what the account has made or lost against the money actually put in — deposits minus withdrawals, realised trades included, not just the positions open right now. The same figure is repeated under the targets.
+
+`tools/t212-positions.py` takes deposits and withdrawals from the export, but a CFD export only sees the CFD side of the account: money moved in from the Invest side shows up as a transfer, not a deposit. If the number disagrees with the History screen, enter the platform's own figure through `Net deposits` in the menu (⌘N) — it overrides the CSV.
+
 ## Targets
 
 Each symbol can carry a take-profit price (`Targets (TP)` in the menu, ⌘T). Enter the price a position would close at — the bid for a long, the same number a Trading 212 TP order takes. A symbol left blank keeps its current price, so a partly filled set still answers "and then what".
