@@ -24,6 +24,7 @@ var showPercent: Bool {
     get { UserDefaults.standard.bool(forKey: "showPercent") }
     set { UserDefaults.standard.set(newValue, forKey: "showPercent") }
 }
+let fxFeeRate = 0.005   // Trading 212 charges 0.5% of the result as an FX fee
 let refreshInterval: TimeInterval = Double(ProcessInfo.processInfo.environment["REFRESH"] ?? "") ?? 5
 
 enum Session: String {
@@ -54,11 +55,13 @@ struct Position {
     let currency: String
     let leverage: Double
     let spread: Double        // platform bid/ask width, in instrument currency
+    let lots: Int
 
     var sign: Double { direction.lowercased() == "sell" ? -1 : 1 }
 
-    /// A long is closed at the bid, a short at the ask; Yahoo's last trade sits near the mid.
+    /// A long is closed at the bid and margined at the ask; Yahoo's last trade sits near the mid.
     func closingPrice(from last: Double) -> Double { last - sign * spread / 2 }
+    func marginPrice(from last: Double) -> Double { last + sign * spread / 2 }
 }
 
 /// Positions exported from Trading 212 (tools/t212-positions.py), plus the cash the
@@ -106,7 +109,8 @@ struct Portfolio {
                 avgPrice: avgPrice,
                 currency: entry["currency"] as? String ?? "USD",
                 leverage: entry["leverage"] as? Double ?? 5,
-                spread: entry["spread"] as? Double ?? 0)
+                spread: entry["spread"] as? Double ?? 0,
+                lots: entry["lots"] as? Int ?? 1)
         }
         guard !positions.isEmpty else { return nil }
 
@@ -120,6 +124,14 @@ struct Portfolio {
 
 /// What the account looks like at a given set of prices — the same arithmetic Trading 212
 /// applies, so the figures keep moving when its own platform is closed for the night.
+struct Holding {
+    let symbol: String
+    let lots: Int
+    let result: Double
+    let value: Double
+    let margin: Double
+}
+
 struct Computed {
     let unrealized: Double
     let equity: Double
@@ -129,6 +141,7 @@ struct Computed {
     let freeFunds: Double
     let priced: Int          // positions we had a price for
     let total: Int
+    let holdings: [Holding]
 }
 
 struct Balance {
@@ -260,6 +273,9 @@ let strings: [String: (String, String)] = [
     "margin": ("Маржа", "Margin"),
     "health": ("Health", "Health"),
     "cash": ("Кэш", "Cash"),
+    "value": ("Стоимость", "Value"),
+    "result": ("Результат", "Result"),
+    "lots": ("поз.", "pos."),
     "stale": ("данные устарели", "stale"),
     "background": ("вкладка в фоне", "tab in background"),
     "free": ("Свободно", "Free funds"),
@@ -329,6 +345,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var fxCache: [String: Double] = [:]
     var computed: Computed?
     var lastComputeLog = Date.distantPast
+    var holdingItems: [NSMenuItem] = []
+    let holdingSlots = 4
     let balancePort: UInt16 = UInt16(ProcessInfo.processInfo.environment["BALANCE_PORT"] ?? "") ?? 47632
     var lastQuote: Quote?
     let priceItem2 = NSMenuItem(title: "", action: #selector(openWeb2), keyEquivalent: "")
@@ -365,6 +383,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         balanceDetailItem.isEnabled = true
         balanceDetailItem.isHidden = true
         menu.addItem(balanceDetailItem)
+        for _ in 0..<holdingSlots {
+            let entry = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            entry.isEnabled = true
+            entry.isHidden = true
+            holdingItems.append(entry)
+            menu.addItem(entry)
+        }
 
         menu.addItem(.separator())
         for (header, storage) in [(newsHeader, 0), (newsHeader2, 1)] {
@@ -705,16 +730,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let portfolio = portfolio else { return }
 
         var unrealized = 0.0, notional = 0.0, margin = 0.0, priced = 0
+        var holdings: [Holding] = []
         for position in portfolio.positions {
             guard let price = priceCache[position.symbol],
                   let fx = rate(from: position.currency) else { continue }
             priced += 1
-            let closing = position.closingPrice(from: price)
-            // Margin follows the mid, the result follows the price a close would get.
-            let value = position.units * price * fx
-            unrealized += position.sign * position.units * (closing - position.avgPrice) * fx
+
+            // A position is valued at the price it would close at and margined at the other
+            // side of the spread, which is how the platform's own totals come out.
+            let value = position.units * position.closingPrice(from: price) * fx
+            let positionMargin = position.units * position.marginPrice(from: price) * fx / position.leverage
+            let pnl = position.sign * position.units * (position.closingPrice(from: price) - position.avgPrice) * fx
+            let result = pnl - fxFeeRate * abs(pnl)   // 0.5% FX fee, charged either way
+
+            unrealized += result
             notional += value
-            margin += value / position.leverage
+            margin += positionMargin
+            holdings.append(Holding(symbol: position.symbol, lots: position.lots,
+                                    result: result, value: value, margin: positionMargin))
         }
         guard priced == portfolio.positions.count, margin > 0 else { return }
 
@@ -730,7 +763,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         computed = Computed(unrealized: unrealized, equity: equity, notional: notional,
                             margin: margin, health: health,
                             freeFunds: max(equity - margin, 0),
-                            priced: priced, total: portfolio.positions.count)
+                            priced: priced, total: portfolio.positions.count,
+                            holdings: holdings)
         if Date().timeIntervalSince(lastComputeLog) > 60 {
             lastComputeLog = Date()
             FileHandle.standardError.write(
@@ -805,7 +839,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         detail.append(styled("   " + note, size: 10, color: .tertiaryLabelColor))
         balanceDetailItem.attributedTitle = detail
+
+        renderHoldings(computed.holdings)
         if lastQuote != nil { render(lastQuote) }   // the title carries equity and health
+    }
+
+    // Per-symbol totals, the same three rows the platform shows under each instrument.
+    func renderHoldings(_ holdings: [Holding]) {
+        for (index, entry) in holdingItems.enumerated() {
+            guard index < holdings.count else {
+                entry.isHidden = true
+                continue
+            }
+            let holding = holdings[index]
+            entry.isHidden = false
+
+            let up = holding.result >= 0
+            let line = NSMutableAttributedString()
+            line.append(styled(String(format: "%-6@", holding.symbol as NSString),
+                               size: 12, weight: .semibold, mono: true))
+            line.append(styled(String(format: "%3d %@   ", holding.lots, t("lots")),
+                               size: 10, color: .tertiaryLabelColor, mono: true))
+            line.append(styled(String(format: "%@%@", up ? "+" : "−", grouped(abs(holding.result))),
+                               size: 12, weight: .semibold, color: accentColor(up: up), mono: true))
+            line.append(styled(String(format: "   \(t("value")) %@   \(t("margin")) %@",
+                                      grouped(holding.value), grouped(holding.margin)),
+                               size: 11, color: .secondaryLabelColor, mono: true))
+            entry.attributedTitle = line
+        }
     }
 
     // Without positions.json there is nothing to compute from, so the scraped numbers
@@ -847,6 +908,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detail.append(styled("   " + note, size: 10,
                              color: computed == nil ? .systemOrange : .tertiaryLabelColor))
         balanceDetailItem.attributedTitle = detail
+        holdingItems.forEach { $0.isHidden = true }
     }
 
     func quoteSegment(_ quote: Quote, accent: NSColor, arrow: String) -> NSAttributedString {
