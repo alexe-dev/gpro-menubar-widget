@@ -62,14 +62,33 @@ object Api {
     private fun read(url: String): JSONObject {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             setRequestProperty("User-Agent", "Mozilla/5.0")
+            instanceFollowRedirects = true
             connectTimeout = 10_000
             readTimeout = 10_000
+        }
+        // A bare inputStream on an error status throws with the URL as its message, which
+        // reads like a broken link rather than the status the server actually returned.
+        val status = connection.responseCode
+        if (status !in 200..299) {
+            val detail = connection.errorStream?.bufferedReader()?.use { it.readText() }?.take(120)
+            error("HTTP $status${if (detail.isNullOrBlank()) "" else " · $detail"}")
         }
         return connection.inputStream.bufferedReader().use { JSONObject(it.readText()) }
     }
 
-    fun sync(gistUrl: String): Sync {
-        val json = read(gistUrl)
+    /// A gist id, a gist page link or a raw link all end up at the same place. The API is
+    /// preferred: raw links go through a CDN that has served stale 404s, the API has not.
+    fun sync(source: String): Sync {
+        val id = Regex("[0-9a-f]{20,40}").find(source)?.value
+        val json = if (id != null && !source.contains("/raw/")) {
+            val gist = read("https://api.github.com/gists/$id")
+            val files = gist.getJSONObject("files")
+            val name = files.keys().asSequence().firstOrNull { it.endsWith(".json") }
+                ?: files.keys().next()
+            JSONObject(files.getJSONObject(name).getString("content"))
+        } else {
+            read(source)
+        }
         val positions = json.getJSONArray("positions").let { array ->
             (0 until array.length()).map { index ->
                 val item = array.getJSONObject(index)

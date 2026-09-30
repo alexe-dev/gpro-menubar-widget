@@ -19,10 +19,14 @@ The payload carries the open positions, the platform-calibrated cash, deposits, 
 the tracked symbols. Re-run it after trading, after changing targets, or whenever the cash
 has been re-pinned.
 
-**The gist URL is a credential.** A secret gist is unlisted, not private: anyone holding the
-URL can read the account figures, so it is never committed. `publish-sync.py` prints it —
-enter it on the phone by tapping the sync line at the bottom of the screen. If it ever leaks,
-delete the gist (`gh gist delete <id>`) and publish again; the old URL dies with it.
+**The gist id is a credential.** A secret gist is unlisted, not private: anyone holding the
+id can read the account figures, so it is never committed. `publish-sync.py` prints it —
+enter it in the app. If it ever leaks, delete the gist (`gh gist delete <id>`) and publish
+again; the old id dies with it.
+
+The app reads the gist through `api.github.com/gists/<id>` rather than a raw link. Raw gist
+URLs are served by a CDN that has handed out stale 404s from other edges, and they also
+carry a revision SHA that changes on every publish.
 
 ## Building
 

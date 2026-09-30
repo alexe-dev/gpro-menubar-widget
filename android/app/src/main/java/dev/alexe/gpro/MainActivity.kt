@@ -61,7 +61,7 @@ private fun Screen() {
         while (true) {
             runCatching { Repository.load(context) }
                 .onSuccess { snapshot = it; error = null }
-                .onFailure { error = it.message ?: it.javaClass.simpleName }
+                .onFailure { error = "${it.javaClass.simpleName}: ${it.message ?: "—"}" }
             delay(15_000)
         }
     }
@@ -100,7 +100,10 @@ private fun Screen() {
                     color = Color.White.copy(alpha = 0.3f), fontSize = 10.sp,
                 )
             }
-            error != null -> Text(error!!, color = DOWN, fontSize = 13.sp)
+            error != null -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(error!!, color = DOWN, fontSize = 13.sp)
+                Text(url, color = Color.White.copy(alpha = 0.4f), fontSize = 10.sp)
+            }
             else -> Text("Loading…", color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
         }
     }
@@ -122,13 +125,13 @@ private fun Setup(onSave: (String) -> Unit) {
         // Shown so a stale install is obvious at a glance.
         Text("build ${BuildConfig.VERSION_NAME}", color = Color.White.copy(alpha = 0.35f), fontSize = 11.sp)
         Text(
-            "Run ./tools/publish-sync.py on the Mac and paste the raw gist URL it prints.",
+            "Run ./tools/publish-sync.py on the Mac and paste the gist id it prints.",
             color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp,
         )
         OutlinedTextField(
             value = value,
             onValueChange = { value = it },
-            label = { Text("https://gist.githubusercontent.com/…") },
+            label = { Text("gist id or URL") },
             modifier = Modifier.fillMaxWidth(),
         )
         Button(onClick = { if (value.isNotBlank()) onSave(value.trim()) }) { Text("Save") }
