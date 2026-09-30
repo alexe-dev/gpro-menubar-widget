@@ -123,7 +123,7 @@ Accuracy against the platform, measured per symbol on a closed market: value, ma
 
 Below the account line sits what the account has made or lost against the money actually put in — deposits minus withdrawals, realised trades included, not just the positions open right now. The same figure is repeated under the targets.
 
-`tools/t212-positions.py` takes deposits and withdrawals from the export, but a CFD export only sees the CFD side of the account: money moved in from the Invest side shows up as a transfer, not a deposit. If the number disagrees with the History screen, enter the platform's own figure through `Net deposits` in the menu (⌘N) — it overrides the CSV.
+Deposits and withdrawals are entered by hand (`Deposits and withdrawals` in the menu, ⌘N) — copy the two totals off the platform's History screen. They are deliberately not read from the export: a CFD export only sees the CFD side of the account, so money moved in from the Invest side shows up as a transfer rather than a deposit, and the totals come out wrong. Update them when you deposit or withdraw.
 
 ## Targets
 
