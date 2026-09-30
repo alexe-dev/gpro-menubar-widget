@@ -53,8 +53,12 @@ struct Position {
     let avgPrice: Double
     let currency: String
     let leverage: Double
+    let spread: Double        // platform bid/ask width, in instrument currency
 
     var sign: Double { direction.lowercased() == "sell" ? -1 : 1 }
+
+    /// A long is closed at the bid, a short at the ask; Yahoo's last trade sits near the mid.
+    func closingPrice(from last: Double) -> Double { last - sign * spread / 2 }
 }
 
 /// Positions exported from Trading 212 (tools/t212-positions.py), plus the cash the
@@ -101,7 +105,8 @@ struct Portfolio {
                 units: units,
                 avgPrice: avgPrice,
                 currency: entry["currency"] as? String ?? "USD",
-                leverage: entry["leverage"] as? Double ?? 5)
+                leverage: entry["leverage"] as? Double ?? 5,
+                spread: entry["spread"] as? Double ?? 0)
         }
         guard !positions.isEmpty else { return nil }
 
@@ -704,8 +709,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let price = priceCache[position.symbol],
                   let fx = rate(from: position.currency) else { continue }
             priced += 1
+            let closing = position.closingPrice(from: price)
+            // Margin follows the mid, the result follows the price a close would get.
             let value = position.units * price * fx
-            unrealized += position.sign * position.units * (price - position.avgPrice) * fx
+            unrealized += position.sign * position.units * (closing - position.avgPrice) * fx
             notional += value
             margin += value / position.leverage
         }
@@ -735,18 +742,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if lastQuote != nil { render(lastQuote) }
     }
 
-    // A fresh platform reading pins the cash down: everything except open-position P/L.
+    // A fresh platform reading pins two things down: the cash, and how far our result sits
+    // from theirs. They value longs at the bid and fold overnight interest into the result,
+    // so the gap is a near-constant offset rather than noise.
     func calibrateCash(from balance: Balance) {
+        // Only while the CFD market is actually open. Outside the session the platform's
+        // figures are frozen at the close, and pinning cash to them would drag our own
+        // equity back to that frozen number — exactly what this calculation exists to avoid.
+        guard lastQuote?.session == .regular else { return }
         guard !balance.hidden, let computed = computed else { return }
         UserDefaults.standard.set(balance.value - computed.unrealized, forKey: "cashCalibrated")
+        if let platformPnl = balance.pnl {
+            UserDefaults.standard.set(platformPnl - computed.unrealized, forKey: "pnlOffset")
+        }
     }
 
     func renderBalance(_ balance: Balance?) {
         if let balance = balance { self.balance = balance }
 
-        // The computed figures are the ones shown: they keep moving outside market hours,
-        // while the platform only reports while its own session is open.
-        guard let computed = computed else {
+        // While the platform is live it is the authority — those are the numbers the account
+        // actually trades on. The moment its session closes or the tab goes away, its figures
+        // freeze, so the Yahoo-based calculation takes over.
+        let platformLive = self.balance.map { account in
+            !account.hidden
+                && Date().timeIntervalSince(account.received) <= 90
+                && lastQuote?.session == .regular
+        } ?? false
+
+        guard let computed = computed, !platformLive else {
             renderScrapedOnly()
             return
         }
@@ -758,15 +781,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         line.append(icon("wallet.bifold.fill", color: .secondaryLabelColor, size: 11))
         line.append(styled(String(format: "  %@  %@ %@", t("balance"), grouped(computed.equity), currency),
                            size: 13, weight: .semibold, mono: true))
-        let positive = computed.unrealized >= 0
-        line.append(styled(String(format: "   %@%@", positive ? "+" : "−", grouped(abs(computed.unrealized))),
+        let result = computed.unrealized + (UserDefaults.standard.object(forKey: "pnlOffset") as? Double ?? 0)
+        let positive = result >= 0
+        // Trading 212 quotes the result against account value, not against what was invested.
+        let percent = computed.equity != 0 ? abs(result / computed.equity) * 100 : 0
+        line.append(styled(String(format: "   %@%@  (%.2f%%)", positive ? "+" : "−", grouped(abs(result)), percent),
                            size: 12, weight: .medium, color: accentColor(up: positive), mono: true))
         balanceItem.attributedTitle = line
 
         let parts = [
             "\(t("margin"))  \(grouped(computed.margin))",
             "\(t("health"))  \(String(format: "%.0f%%", computed.health))",
-            "\(t("free"))  \(grouped(computed.freeFunds))",
+            "\(t("cash"))  \(grouped(computed.freeFunds))",
         ]
         let detail = NSMutableAttributedString()
         detail.append(styled(parts.joined(separator: "     ·     "),
@@ -815,9 +841,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let detail = NSMutableAttributedString()
         detail.append(styled(parts.joined(separator: "     ·     "),
                              size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
-        var note = relative(account.received) + " · " + t("noPositions")
+        var note = t("platform") + " · " + relative(account.received)
+        if computed == nil { note += " · " + t("noPositions") }
         if account.hidden { note += " · " + t("background") }
-        detail.append(styled("   " + note, size: 10, color: .systemOrange))
+        detail.append(styled("   " + note, size: 10,
+                             color: computed == nil ? .systemOrange : .tertiaryLabelColor))
         balanceDetailItem.attributedTitle = detail
     }
 
@@ -937,8 +965,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // so it reads as a second figure, with a small "k" that stays out of the way.
         // Age is flagged with a mark rather than by dimming — a number worth showing is
         // worth showing legibly.
-        let equity = computed?.equity ?? balance?.value
-        let healthPercent = computed.map { String(format: "%.0f%%", $0.health) } ?? balance?.health
+        let platformLive = balance.map { account in
+            !account.hidden
+                && Date().timeIntervalSince(account.received) <= 90
+                && q.session == .regular
+        } ?? false
+        let equity = platformLive ? balance?.value : (computed?.equity ?? balance?.value)
+        let healthPercent = platformLive
+            ? balance?.health
+            : (computed.map { String(format: "%.0f%%", $0.health) } ?? balance?.health)
         if let equity = equity {
             title.append(NSAttributedString(string: "  "))
             title.append(styled(String(format: "%.0f", equity / 1000),

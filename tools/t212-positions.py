@@ -15,6 +15,11 @@ from pathlib import Path
 
 LEVERAGE = 5.0   # 1:5 on equity CFDs; override per symbol below if yours differ
 
+# Trading 212 values a long at the bid while Yahoo reports the last trade, which sits
+# near the mid — on a wide spread that difference is real money. Read SELL/BUY off the
+# instrument page and put the difference here.
+SPREADS = {"GPRO": 0.03, "KOD": 0.14}
+
 
 def parse(path):
     rows = list(csv.DictReader(open(path)))
@@ -69,6 +74,7 @@ def parse(path):
                 "avgPrice": round(book["cost"] / book["units"], 6),
                 "currency": book["currency"],
                 "leverage": LEVERAGE,
+                "spread": SPREADS.get(symbol, 0.0),
                 "lots": book["count"],
             }
             for symbol, book in sorted(books.items())
@@ -87,7 +93,7 @@ def main():
     print(f"{out}")
     for p in data["positions"]:
         print(f"  {p['symbol']:6} {p['direction']:4} {p['units']:>12,.2f} units  avg {p['avgPrice']:.4f} {p['currency']}"
-              f"  ({p['lots']} lots, 1:{p['leverage']:.0f})")
+              f"  ({p['lots']} lots, 1:{p['leverage']:.0f}, spread {p['spread']})")
     print(f"  cash fallback {data['cashFallback']:,.2f} {data['accountCurrency']}")
 
 
