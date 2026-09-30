@@ -78,8 +78,8 @@ private fun Screen() {
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("GPRO", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold)
+            Text("GPRO ${BuildConfig.VERSION_NAME}", color = Color.White.copy(alpha = 0.5f),
+                fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { settings = true }) {
                 Text("sync", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
@@ -119,6 +119,8 @@ private fun Setup(onSave: (String) -> Unit) {
     var value by remember { mutableStateOf("") }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Sync URL", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        // Shown so a stale install is obvious at a glance.
+        Text("build ${BuildConfig.VERSION_NAME}", color = Color.White.copy(alpha = 0.35f), fontSize = 11.sp)
         Text(
             "Run ./tools/publish-sync.py on the Mac and paste the raw gist URL it prints.",
             color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp,
