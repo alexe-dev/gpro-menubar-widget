@@ -12,7 +12,7 @@ A single Swift file, no dependencies, no Xcode project — it builds with the sy
 
 In the menu bar: the price, the percentage change in color, and an icon for the current trading session — sunrise for pre-market, sun for regular hours, sunset for after-hours, moon when the market is closed.
 
-In the dropdown: the price to 4 decimals with the absolute change, the instrument name and session, the regular session close and the previous close marked with `◂ base` (the number the percentage is computed from), the day and 52-week ranges, the timestamps of the last tick and the last poll, and the three latest headlines per symbol — click one to open it in the browser.
+In the dropdown: the price to 4 decimals with the absolute change, the instrument name and session, the regular session close and the previous close marked with `◂ base` (the number the percentage is computed from), the day and 52-week ranges, the timestamps of the last tick and the last poll, and the latest headline per symbol — click it to open in the browser.
 
 ## Install
 
@@ -39,7 +39,7 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/local.gpro.widget.plist
 
 **Symbols** — two are tracked at once. Pick them from the menu (`Symbol: GPRO` ⌘S, `Second symbol: KOD` ⌘D) and type any Yahoo Finance ticker such as `AAPL` or `BTC-USD`. Both choices are remembered; if a ticker does not resolve, the previous one is kept. Defaults are `GPRO` and `KOD`.
 
-The menu bar shows both quotes in order, primary first. The dropdown gives the primary symbol the full treatment — base marker, ranges, news — and the secondary one a compact block with its price, change, name and ranges. Clicking that block opens it on Yahoo Finance. Each symbol gets its own headlines section.
+The menu bar shows both quotes in order, primary first. The dropdown gives the primary symbol the full treatment — base marker, ranges, news — and the secondary one a compact block with its price, change, name and ranges. Clicking that block opens it on Yahoo Finance. Each symbol carries its latest headline.
 
 **Language** — English or Russian, switchable from the menu. English by default, the choice is remembered.
 
@@ -63,7 +63,7 @@ The Yahoo Finance chart API, one-minute bars with `includePrePost=true`:
 
 ```
 https://query1.finance.yahoo.com/v8/finance/chart/GPRO?interval=1m&range=1d&includePrePost=true
-https://query1.finance.yahoo.com/v1/finance/search?q=GPRO&newsCount=3    # headlines, polled every 5 minutes
+https://query1.finance.yahoo.com/v1/finance/search?q=GPRO&newsCount=1    # headline, polled every 5 minutes
 ```
 
 The extended-hours price is taken as the last non-null `close` of the minute series — it is not exposed in `meta`, which only carries the regular session price. The current session is determined by where the tick's timestamp falls within `meta.currentTradingPeriod`. During pre-market and after-hours the percentage is computed against the regular session close, during regular hours against the previous close, matching Yahoo itself.

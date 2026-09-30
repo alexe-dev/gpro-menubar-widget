@@ -355,7 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var newsTimer: Timer?
     let newsHeader = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var newsItems: [NSMenuItem] = []
-    let newsCount = 3
+    let newsCount = 1   // one headline per symbol, the latest
     let newsHeader2 = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var newsItems2: [NSMenuItem] = []
     let languageItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
