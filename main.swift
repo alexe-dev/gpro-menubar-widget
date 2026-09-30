@@ -1350,14 +1350,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 && Date().timeIntervalSince(account.received) <= 90
                 && q.session == .regular
         } ?? false
+        // The menu bar carries the overall figure — equity against the money put in —
+        // since that is the number worth glancing at; the equity itself lives in the menu.
+        let invested = netDeposits
         let equity = platformLive ? balance?.value : (computed?.equity ?? balance?.value)
+        let headline = (invested != 0 && !platformLive) ? computed.map { $0.equity - invested } : equity
         let healthPercent = platformLive
             ? balance?.health
             : (computed.map { String(format: "%.0f%%", $0.health) } ?? balance?.health)
-        if let equity = equity {
+        if let headline = headline {
+            // The overall figure is signed and coloured; a bare equity is not.
+            let overall = invested != 0 && !platformLive
             title.append(NSAttributedString(string: "  "))
-            title.append(styled(String(format: "%.0f", equity / 1000),
-                                size: 13, weight: .semibold, mono: true))
+            title.append(styled(String(format: overall ? "%+.0f" : "%.0f", headline / 1000),
+                                size: 13, weight: .semibold,
+                                color: overall ? accentColor(up: headline >= 0) : .labelColor, mono: true))
             title.append(styled("k", size: 10, weight: .medium, color: .secondaryLabelColor))
 
             // Health is the number that matters when it drops, so it is colored by level.
