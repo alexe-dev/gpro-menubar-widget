@@ -1,0 +1,25 @@
+{
+  "generated": "2026-09-30T12:49:49+03:00",
+  "accountCurrency": "CZK",
+  "cashFallback": 1089256.09,
+  "positions": [
+    {
+      "symbol": "GPRO",
+      "direction": "Buy",
+      "units": 52000.0,
+      "avgPrice": 1.692105,
+      "currency": "USD",
+      "leverage": 5.0,
+      "lots": 19
+    },
+    {
+      "symbol": "KOD",
+      "direction": "Buy",
+      "units": 1140.316,
+      "avgPrice": 86.644165,
+      "currency": "USD",
+      "leverage": 5.0,
+      "lots": 14
+    }
+  ]
+}

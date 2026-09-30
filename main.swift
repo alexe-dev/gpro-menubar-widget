@@ -46,6 +46,67 @@ struct Quote {
     let tickTime: Date
 }
 
+struct Position {
+    let symbol: String
+    let direction: String     // Buy / Sell
+    let units: Double
+    let avgPrice: Double
+    let currency: String
+    let leverage: Double
+
+    var sign: Double { direction.lowercased() == "sell" ? -1 : 1 }
+}
+
+/// Positions exported from Trading 212 (tools/t212-positions.py), plus the cash the
+/// account had aside from open-position P/L.
+struct Portfolio {
+    let accountCurrency: String
+    let cashFallback: Double
+    let positions: [Position]
+    let generated: String
+
+    static func load() -> Portfolio? {
+        let path = UserDefaults.standard.string(forKey: "positionsPath")
+            ?? Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("positions.json").path
+        guard let data = FileManager.default.contents(atPath: path),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let raw = json["positions"] as? [[String: Any]] else { return nil }
+
+        let positions = raw.compactMap { entry -> Position? in
+            guard let symbol = entry["symbol"] as? String,
+                  let units = entry["units"] as? Double,
+                  let avgPrice = entry["avgPrice"] as? Double else { return nil }
+            return Position(
+                symbol: symbol,
+                direction: entry["direction"] as? String ?? "Buy",
+                units: units,
+                avgPrice: avgPrice,
+                currency: entry["currency"] as? String ?? "USD",
+                leverage: entry["leverage"] as? Double ?? 5)
+        }
+        guard !positions.isEmpty else { return nil }
+
+        return Portfolio(
+            accountCurrency: json["accountCurrency"] as? String ?? "CZK",
+            cashFallback: json["cashFallback"] as? Double ?? 0,
+            positions: positions,
+            generated: json["generated"] as? String ?? "")
+    }
+}
+
+/// What the account looks like at a given set of prices — the same arithmetic Trading 212
+/// applies, so the figures keep moving when its own platform is closed for the night.
+struct Computed {
+    let unrealized: Double
+    let equity: Double
+    let notional: Double
+    let margin: Double
+    let health: Double
+    let freeFunds: Double
+    let priced: Int          // positions we had a price for
+    let total: Int
+}
+
 struct Balance {
     let value: Double          // account value
     let currency: String
@@ -177,6 +238,10 @@ let strings: [String: (String, String)] = [
     "cash": ("Кэш", "Cash"),
     "stale": ("данные устарели", "stale"),
     "background": ("вкладка в фоне", "tab in background"),
+    "free": ("Свободно", "Free funds"),
+    "computed": ("по ценам Yahoo", "from Yahoo prices"),
+    "platform": ("T212", "T212"),
+    "noPositions": ("positions.json не найден", "positions.json not found"),
     "unknownSymbol": ("Не нашёл такой тикер — оставил %@", "No such symbol — keeping %@"),
     "quit": ("Выход", "Quit"),
     "error": ("Ошибка загрузки · повтор через %d с", "Fetch failed · retrying in %ds"),
@@ -235,6 +300,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var balanceServer: BalanceServer?
     let balanceDetailItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var balance: Balance?
+    var portfolio: Portfolio?
+    var priceCache: [String: Double] = [:]
+    var fxCache: [String: Double] = [:]
+    var computed: Computed?
+    var lastComputeLog = Date.distantPast
     let balancePort: UInt16 = UInt16(ProcessInfo.processInfo.environment["BALANCE_PORT"] ?? "") ?? 47632
     var lastQuote: Quote?
     let priceItem2 = NSMenuItem(title: "", action: #selector(openWeb2), keyEquivalent: "")
@@ -330,6 +400,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.refresh()
         }
         timer?.tolerance = refreshInterval / 5
+        Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            self?.refreshPortfolio()
+        }.tolerance = 5
 
         // News changes rarely, so it gets its own 5-minute timer instead of hammering the endpoint.
         refreshNews()
@@ -338,9 +411,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         newsTimer?.tolerance = 30
 
+        portfolio = Portfolio.load()
+        refreshPortfolio()
+
         // The Chrome extension pushes the Trading 212 balance here; the widget never scrapes anything itself.
         balanceServer = BalanceServer { [weak self] balance in
-            DispatchQueue.main.async { self?.renderBalance(balance) }
+            DispatchQueue.main.async {
+                self?.calibrateCash(from: balance)
+                self?.renderBalance(balance)
+            }
         }
         balanceServer?.start(port: balancePort)
     }
@@ -564,12 +643,130 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if lastQuote != nil { render(lastQuote) }   // the title carries both quotes
     }
 
-    func renderBalance(_ balance: Balance?) {
-        if let balance = balance {
-            self.balance = balance
-            render(lastQuote)   // the menu bar title carries the account total too
+    // Prices for every position symbol, not just the two on display, plus the FX rates
+    // that carry instrument currency into account currency.
+    func refreshPortfolio() {
+        guard let portfolio = portfolio else { return }
+
+        let symbols = Set(portfolio.positions.map(\.symbol))
+        let pairs = Set(portfolio.positions.map(\.currency))
+            .filter { $0 != portfolio.accountCurrency }
+            .map { "\($0)\(portfolio.accountCurrency)=X" }
+
+        let group = DispatchGroup()
+        for ticker in symbols {
+            group.enter()
+            fetch(ticker) { [weak self] quote in
+                if let quote = quote { self?.priceCache[ticker] = quote.price }
+                group.leave()
+            }
         }
-        guard let account = self.balance else {
+        for pair in pairs {
+            group.enter()
+            fetch(pair) { [weak self] quote in
+                if let quote = quote { self?.fxCache[pair] = quote.price }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) { [weak self] in self?.recompute() }
+    }
+
+    func rate(from currency: String) -> Double? {
+        guard let portfolio = portfolio else { return nil }
+        if currency == portfolio.accountCurrency { return 1 }
+        return fxCache["\(currency)\(portfolio.accountCurrency)=X"]
+    }
+
+    func recompute() {
+        guard let portfolio = portfolio else { return }
+
+        var unrealized = 0.0, notional = 0.0, margin = 0.0, priced = 0
+        for position in portfolio.positions {
+            guard let price = priceCache[position.symbol],
+                  let fx = rate(from: position.currency) else { continue }
+            priced += 1
+            let value = position.units * price * fx
+            unrealized += position.sign * position.units * (price - position.avgPrice) * fx
+            notional += value
+            margin += value / position.leverage
+        }
+        guard priced == portfolio.positions.count, margin > 0 else { return }
+
+        // Cash is calibrated against the platform's own equity whenever a live reading
+        // arrives; between readings it only moves with realised events, which are rare.
+        let cash = UserDefaults.standard.object(forKey: "cashCalibrated") as? Double ?? portfolio.cashFallback
+        let equity = cash + unrealized
+
+        // Trading 212's account status: below 50% it is measured against the margin alone,
+        // above it against funds plus margin. Both branches meet at 50%.
+        let health = equity < margin ? equity / margin * 50 : equity / (equity + margin) * 100
+
+        computed = Computed(unrealized: unrealized, equity: equity, notional: notional,
+                            margin: margin, health: health,
+                            freeFunds: max(equity - margin, 0),
+                            priced: priced, total: portfolio.positions.count)
+        if Date().timeIntervalSince(lastComputeLog) > 60 {
+            lastComputeLog = Date()
+            FileHandle.standardError.write(
+                String(format: "computed: equity=%.0f pnl=%.0f margin=%.0f health=%.1f%% free=%.0f\n",
+                       equity, unrealized, margin, health, computed?.freeFunds ?? 0)
+                    .data(using: .utf8)!)
+        }
+        renderBalance(nil)
+        if lastQuote != nil { render(lastQuote) }
+    }
+
+    // A fresh platform reading pins the cash down: everything except open-position P/L.
+    func calibrateCash(from balance: Balance) {
+        guard !balance.hidden, let computed = computed else { return }
+        UserDefaults.standard.set(balance.value - computed.unrealized, forKey: "cashCalibrated")
+    }
+
+    func renderBalance(_ balance: Balance?) {
+        if let balance = balance { self.balance = balance }
+
+        // The computed figures are the ones shown: they keep moving outside market hours,
+        // while the platform only reports while its own session is open.
+        guard let computed = computed else {
+            renderScrapedOnly()
+            return
+        }
+        let currency = portfolio?.accountCurrency ?? ""
+        balanceItem.isHidden = false
+        balanceDetailItem.isHidden = false
+
+        let line = NSMutableAttributedString()
+        line.append(icon("wallet.bifold.fill", color: .secondaryLabelColor, size: 11))
+        line.append(styled(String(format: "  %@  %@ %@", t("balance"), grouped(computed.equity), currency),
+                           size: 13, weight: .semibold, mono: true))
+        let positive = computed.unrealized >= 0
+        line.append(styled(String(format: "   %@%@", positive ? "+" : "−", grouped(abs(computed.unrealized))),
+                           size: 12, weight: .medium, color: accentColor(up: positive), mono: true))
+        balanceItem.attributedTitle = line
+
+        let parts = [
+            "\(t("margin"))  \(grouped(computed.margin))",
+            "\(t("health"))  \(String(format: "%.0f%%", computed.health))",
+            "\(t("free"))  \(grouped(computed.freeFunds))",
+        ]
+        let detail = NSMutableAttributedString()
+        detail.append(styled(parts.joined(separator: "     ·     "),
+                             size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
+
+        // The platform's own reading stays visible as a cross-check while it is live.
+        var note = t("computed")
+        if let account = self.balance, Date().timeIntervalSince(account.received) <= 90, !account.hidden {
+            note += "   ·   \(t("platform")) \(grouped(account.value))"
+        }
+        detail.append(styled("   " + note, size: 10, color: .tertiaryLabelColor))
+        balanceDetailItem.attributedTitle = detail
+        if lastQuote != nil { render(lastQuote) }   // the title carries equity and health
+    }
+
+    // Without positions.json there is nothing to compute from, so the scraped numbers
+    // are shown as they arrive.
+    func renderScrapedOnly() {
+        guard let account = balance else {
             balanceItem.isHidden = true
             balanceDetailItem.isHidden = true
             return
@@ -577,25 +774,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         balanceItem.isHidden = false
         balanceDetailItem.isHidden = false
 
-        // A tab that stopped updating is worse than no number, so age is always shown.
         let stale = Date().timeIntervalSince(account.received) > 90
-        let primary: NSColor = stale ? .secondaryLabelColor : .labelColor
-
         let line = NSMutableAttributedString()
         line.append(icon("wallet.bifold.fill", color: .secondaryLabelColor, size: 11))
         line.append(styled(String(format: "  %@  %@ %@", t("balance"), grouped(account.value), account.currency),
-                           size: 13, weight: .semibold, color: primary, mono: true))
+                           size: 13, weight: .semibold,
+                           color: stale ? .secondaryLabelColor : .labelColor, mono: true))
         if let pnl = account.pnl {
             let positive = pnl >= 0
-            let color: NSColor = stale
-                ? .secondaryLabelColor
-                : (positive ? NSColor(srgbRed: 0.10, green: 0.45, blue: 0.24, alpha: 1)
-                            : NSColor(srgbRed: 0.72, green: 0.20, blue: 0.18, alpha: 1))
             var text = String(format: "   %@%@", positive ? "+" : "−", grouped(abs(pnl)))
-            if let percent = account.pnlPercent {
-                text += String(format: "  (%.2f%%)", abs(percent))
-            }
-            line.append(styled(text, size: 12, weight: .medium, color: color, mono: true))
+            if let percent = account.pnlPercent { text += String(format: "  (%.2f%%)", abs(percent)) }
+            line.append(styled(text, size: 12, weight: .medium,
+                               color: stale ? .secondaryLabelColor : accentColor(up: positive), mono: true))
         }
         balanceItem.attributedTitle = line
 
@@ -606,11 +796,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let detail = NSMutableAttributedString()
         detail.append(styled(parts.joined(separator: "     ·     "),
                              size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
-        var note = relative(account.received)
+        var note = relative(account.received) + " · " + t("noPositions")
         if account.hidden { note += " · " + t("background") }
-        if stale { note += " · " + t("stale") }
-        detail.append(styled("   " + note, size: 10,
-                             color: (stale || account.hidden) ? .systemOrange : .tertiaryLabelColor))
+        detail.append(styled("   " + note, size: 10, color: .systemOrange))
         balanceDetailItem.attributedTitle = detail
     }
 
@@ -730,14 +918,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // so it reads as a second figure, with a small "k" that stays out of the way.
         // Age is flagged with a mark rather than by dimming — a number worth showing is
         // worth showing legibly.
-        if let account = balance {
+        let equity = computed?.equity ?? balance?.value
+        let healthPercent = computed.map { String(format: "%.0f%%", $0.health) } ?? balance?.health
+        if let equity = equity {
             title.append(NSAttributedString(string: "  "))
-            title.append(styled(String(format: "%.0f", account.value / 1000),
+            title.append(styled(String(format: "%.0f", equity / 1000),
                                 size: 13, weight: .semibold, mono: true))
             title.append(styled("k", size: 10, weight: .medium, color: .secondaryLabelColor))
 
             // Health is the number that matters when it drops, so it is colored by level.
-            if let health = account.health {
+            if let health = healthPercent {
                 let level = Double(health.filter("0123456789.".contains)) ?? 100
                 let color: NSColor = level < 20
                     ? NSColor(srgbRed: 0.72, green: 0.20, blue: 0.18, alpha: 1)
@@ -748,8 +938,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 title.append(styled(" " + health, size: 12, weight: .semibold, color: color, mono: true))
             }
 
-            let ageing = Date().timeIntervalSince(account.received) > 90
-            if ageing || account.hidden {
+            // Computed figures never go stale: they follow the Yahoo quotes.
+            let account = balance
+            let ageing = computed == nil && (account.map { Date().timeIntervalSince($0.received) > 90 } ?? false)
+            if ageing || (computed == nil && account?.hidden == true) {
                 title.append(NSAttributedString(string: " "))
                 title.append(icon(ageing ? "clock.badge.exclamationmark.fill" : "zzz",
                                   color: .systemOrange, size: 9))
