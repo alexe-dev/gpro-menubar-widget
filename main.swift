@@ -31,6 +31,16 @@ var takeProfit: [String: Double] {
     set { UserDefaults.standard.set(newValue, forKey: "takeProfit") }
 }
 
+// Money put in minus money taken out. A CFD export only sees the CFD side of the
+// account, so this can be set by hand to the figure the platform's History screen shows.
+var netDeposits: Double? {
+    get { UserDefaults.standard.object(forKey: "netDeposits") as? Double }
+    set {
+        if let value = newValue { UserDefaults.standard.set(value, forKey: "netDeposits") }
+        else { UserDefaults.standard.removeObject(forKey: "netDeposits") }
+    }
+}
+
 let fxFeeRate = 0.005   // Trading 212 charges 0.5% of the result as an FX fee
 let refreshInterval: TimeInterval = Double(ProcessInfo.processInfo.environment["REFRESH"] ?? "") ?? 5
 
@@ -76,6 +86,7 @@ struct Position {
 struct Portfolio {
     let accountCurrency: String
     let cashFallback: Double
+    let netDeposits: Double
     let positions: [Position]
     let generated: String
 
@@ -124,6 +135,7 @@ struct Portfolio {
         return Portfolio(
             accountCurrency: json["accountCurrency"] as? String ?? "CZK",
             cashFallback: json["cashFallback"] as? Double ?? 0,
+            netDeposits: json["netDeposits"] as? Double ?? 0,
             positions: positions,
             generated: json["generated"] as? String ?? "")
     }
@@ -300,7 +312,12 @@ let strings: [String: (String, String)] = [
     "tpSetInfo": ("Цена закрытия позиции: для лонга это bid. Пусто — без цели.",
                   "The price a position closes at — the bid for a long. Empty means no target."),
     "atTarget": ("При целях", "At targets"),
-    "upside": ("прирост", "upside"),
+    "upside": ("к текущему", "vs now"),
+    "invested": ("Внесено", "Net in"),
+    "lifetime": ("Итого", "Overall"),
+    "setDeposits": ("Внесено за всё время", "Net deposits"),
+    "setDepositsInfo": ("Депозиты минус выводы, как на экране History. Пусто — взять из CSV.",
+                        "Deposits minus withdrawals, as the History screen shows. Empty falls back to the CSV."),
     "stale": ("данные устарели", "stale"),
     "background": ("вкладка в фоне", "tab in background"),
     "free": ("Свободно", "Free funds"),
@@ -375,6 +392,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var tpItems: [NSMenuItem] = []
     let tpTotalItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var tpMenuItem = NSMenuItem()
+    var depositsItem = NSMenuItem()
+    let lifetimeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let balancePort: UInt16 = UInt16(ProcessInfo.processInfo.environment["BALANCE_PORT"] ?? "") ?? 47632
     var lastQuote: Quote?
     var lastQuote2: Quote?
@@ -415,6 +434,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         balanceDetailItem.isEnabled = true
         balanceDetailItem.isHidden = true
         menu.addItem(balanceDetailItem)
+        lifetimeItem.isEnabled = true
+        lifetimeItem.isHidden = true
+        menu.addItem(lifetimeItem)
         for _ in 0..<holdingSlots {
             let entry = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             entry.isEnabled = true
@@ -458,6 +480,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         symbolItem2 = NSMenuItem(title: "", action: #selector(changeSymbol2), keyEquivalent: "d")
         symbolItem2.target = self
         menu.addItem(symbolItem2)
+        depositsItem = NSMenuItem(title: "", action: #selector(editDeposits), keyEquivalent: "n")
+        depositsItem.target = self
+        menu.addItem(depositsItem)
         tpMenuItem = NSMenuItem(title: "", action: #selector(editTargets), keyEquivalent: "t")
         tpMenuItem.target = self
         menu.addItem(tpMenuItem)
@@ -540,6 +565,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         symbolItem2.title = String(format: t("symbol2"), symbol2)
         percentItem.title = t("showPercent")
         tpMenuItem.title = t("tp")
+        depositsItem.title = t("setDeposits")
         refreshItem.title = t("refresh")
         webItem.title = t("openWeb")
         languageItem.title = t("language")
@@ -631,6 +657,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    @objc func editDeposits() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = t("setDeposits")
+        alert.informativeText = t("setDepositsInfo")
+        alert.addButton(withTitle: t("ok"))
+        alert.addButton(withTitle: t("cancel"))
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        if let value = netDeposits { field.stringValue = String(format: "%.2f", value) }
+        field.placeholderString = portfolio.map { String(format: "%.2f", $0.netDeposits) } ?? "0"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let text = field.stringValue.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+        netDeposits = text.isEmpty ? nil : Double(text)
+        recompute()
     }
 
     @objc func editTargets() {
@@ -937,9 +985,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detail.append(styled("   " + note, size: 10, color: .tertiaryLabelColor))
         balanceDetailItem.attributedTitle = detail
 
+        renderLifetime(computed)
         renderHoldings(computed.holdings)
         renderScenario(computed)
         if lastQuote != nil { render(lastQuote) }   // the title carries equity and health
+    }
+
+    // Equity against the money actually put in: what the account made or lost overall,
+    // realised trades included, rather than just on the positions open right now.
+    func renderLifetime(_ computed: Computed) {
+        let invested = netDeposits ?? portfolio?.netDeposits ?? 0
+        guard invested != 0 else {
+            lifetimeItem.isHidden = true
+            return
+        }
+        lifetimeItem.isHidden = false
+        let overall = computed.equity - invested
+        let up = overall >= 0
+        let line = NSMutableAttributedString()
+        line.append(styled(String(format: "%@  %@", t("invested"), grouped(invested)),
+                           size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
+        line.append(styled(String(format: "     %@  ", t("lifetime")),
+                           size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
+        line.append(styled(String(format: "%@%@", up ? "+" : "−", grouped(abs(overall))),
+                           size: 12, weight: .semibold, color: accentColor(up: up), mono: true))
+        if invested > 0 {
+            line.append(styled(String(format: "  (%+.1f%%)", overall / invested * 100),
+                               size: 11, color: accentColor(up: up), mono: true))
+        }
+        lifetimeItem.attributedTitle = line
     }
 
     func renderScenario(_ computed: Computed) {
@@ -985,6 +1059,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         total.append(styled(String(format: "   \(t("health")) %.0f%%   \(t("cash")) %@   \(t("upside")) +%@",
                                    scenario.health, grouped(scenario.freeFunds), grouped(max(delta, 0))),
                             size: 11, color: .secondaryLabelColor, mono: true))
+
+        let invested = netDeposits ?? portfolio?.netDeposits ?? 0
+        if invested != 0 {
+            let overall = scenario.equity - invested
+            let overallUp = overall >= 0
+            total.append(styled(String(format: "   %@ ", t("lifetime")), size: 11, color: .secondaryLabelColor))
+            total.append(styled(String(format: "%@%@", overallUp ? "+" : "−", grouped(abs(overall))),
+                                size: 11, weight: .semibold, color: accentColor(up: overallUp), mono: true))
+        }
         tpTotalItem.attributedTitle = total
     }
 
@@ -1053,6 +1136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                              color: computed == nil ? .systemOrange : .tertiaryLabelColor))
         balanceDetailItem.attributedTitle = detail
         holdingItems.forEach { $0.isHidden = true }
+        lifetimeItem.isHidden = true
         tpItems.forEach { $0.isHidden = true }
         tpHeader.isHidden = true
         tpTotalItem.isHidden = true
