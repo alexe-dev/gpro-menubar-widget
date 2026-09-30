@@ -119,6 +119,12 @@ Cash is only re-pinned during the regular session. Outside it the platform's num
 
 Accuracy against the platform, measured per symbol on a closed market: value, margin, p/l, FX fee and result all land within **0.03%** of the figures Trading 212 shows. The FX rate it uses turns out to be the market one — `USDCZK=X` reproduced its totals to four digits.
 
+## Targets
+
+Each symbol can carry a take-profit price (`Targets (TP)` in the menu, ⌘T). Enter the price a position would close at — the bid for a long, the same number a Trading 212 TP order takes. A symbol left blank keeps its current price, so a partly filled set still answers "and then what".
+
+The dropdown then gains a second block running the same arithmetic at those prices: the result per symbol, the account value that would follow, and the health, free funds and upside that come with it.
+
 ## License
 
 MIT
