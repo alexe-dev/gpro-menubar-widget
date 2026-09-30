@@ -90,10 +90,13 @@ Generate the positions file from a Trading 212 CSV export (History → Export):
 
 This writes `positions.json` next to the app: open positions with their units, average entry price and leverage, plus the account cash excluding open-position P/L. Re-run it whenever you open or close positions — an export is a snapshot, not a feed.
 
+While Trading 212's own session is open and the tab is live, its figures are shown as they arrive — that is what the account actually trades on. The moment the session closes or the tab goes away, they freeze, and the computed ones take over.
+
 The arithmetic mirrors the platform's own:
 
 ```
-unrealised = Σ  sign · units · (price − entry) · fx
+closing    = last − sign · spread / 2          # a long closes at the bid
+unrealised = Σ  sign · units · (closing − entry) · fx
 margin     = Σ  units · price · fx / leverage
 equity     = cash + unrealised
 health     = equity < margin  ?  equity / margin × 50
@@ -103,9 +106,13 @@ free funds = max(equity − margin, 0)
 
 The two-branch health formula is Trading 212's [account margin status](https://helpcentre.trading212.com/hc/en-us/articles/360007119457-What-does-my-account-margin-status-show); both branches meet at 50%. A margin call email goes out at 45% and positions start closing at 25%.
 
+Spreads matter more than they look: Trading 212 values a long at the bid while Yahoo reports the last trade, near the mid. On 52,000 GPRO units a 0.03 spread is ~17,000 CZK of result. Put the spreads you see on the instrument pages into `SPREADS` in `tools/t212-positions.py`.
+
 Cash is the one input an export cannot keep current, so it is re-pinned automatically: whenever a live reading arrives from the browser extension, cash is set to that equity minus the unrealised P/L computed at the same moment. Between market sessions the widget carries that cash forward and only the prices move.
 
-Accuracy against the platform's own figures is within roughly a percent — Trading 212 prices longs at the bid and uses its own FX mid-rate, Yahoo gives neither exactly. Validated against a live screenshot: computed result −445.9k vs −447.3k shown, health 32.5% vs 32% shown.
+Cash is only re-pinned during the regular session. Outside it the platform's numbers are frozen at the close, and calibrating against them would drag the computed equity back to that frozen figure — defeating the point.
+
+Accuracy against the platform, measured on a closed market: result −324.9k vs −322.3k shown (0.8%), margin 741.9k vs 747.0k (0.7%), health 50.4% vs 51%. What remains is Trading 212's own FX mid-rate and the exact bid at their last tick.
 
 ## License
 

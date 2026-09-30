@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-30T12:49:49+03:00",
+  "generated": "2026-09-30T13:01:01+03:00",
   "accountCurrency": "CZK",
   "cashFallback": 1089256.09,
   "positions": [
@@ -10,6 +10,7 @@
       "avgPrice": 1.692105,
       "currency": "USD",
       "leverage": 5.0,
+      "spread": 0.03,
       "lots": 19
     },
     {
@@ -19,6 +20,7 @@
       "avgPrice": 86.644165,
       "currency": "USD",
       "leverage": 5.0,
+      "spread": 0.14,
       "lots": 14
     }
   ]
