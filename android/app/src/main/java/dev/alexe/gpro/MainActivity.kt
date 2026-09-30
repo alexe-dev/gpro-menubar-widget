@@ -50,16 +50,18 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Screen() {
     val context = LocalContext.current
+    var url by remember { mutableStateOf(Repository.gistUrl(context)) }
     var snapshot by remember { mutableStateOf<Snapshot?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var settings by remember { mutableStateOf(false) }
 
     // Prices move constantly, so the screen refreshes itself while it is open.
-    LaunchedEffect(Unit) {
+    LaunchedEffect(url) {
+        if (url.isBlank()) return@LaunchedEffect
         while (true) {
             runCatching { Repository.load(context) }
                 .onSuccess { snapshot = it; error = null }
-                .onFailure { error = it.message ?: "load failed" }
+                .onFailure { error = it.message ?: it.javaClass.simpleName }
             delay(15_000)
         }
     }
@@ -69,25 +71,66 @@ private fun Screen() {
             .padding(horizontal = 16.dp).padding(top = 48.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        val current = snapshot
-        if (current == null) {
-            Text(error ?: "Loading…", color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp)
-        } else {
-            Hero(current)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                current.quotes.forEach { QuoteTile(it, Modifier.weight(1f)) }
+        // Without a sync URL there is nothing to show, so the field is the screen.
+        if (url.isBlank()) {
+            Setup { saved -> Repository.setGistUrl(context, saved); url = saved }
+            return@Column
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("GPRO", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { settings = true }) {
+                Text("sync", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
             }
-            Positions(current)
-            current.atTargets?.let { Targets(current, it) }
-            Text(
-                "sync ${current.sync.generated.take(16).replace('T', ' ')}",
-                color = Color.White.copy(alpha = 0.3f), fontSize = 10.sp,
-                modifier = Modifier.clickable { settings = true },
-            )
+        }
+
+        val current = snapshot
+        when {
+            current != null -> {
+                Hero(current)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    current.quotes.forEach { QuoteTile(it, Modifier.weight(1f)) }
+                }
+                Positions(current)
+                current.atTargets?.let { Targets(current, it) }
+                Text(
+                    "updated ${current.sync.generated.take(16).replace('T', ' ')}",
+                    color = Color.White.copy(alpha = 0.3f), fontSize = 10.sp,
+                )
+            }
+            error != null -> Text(error!!, color = DOWN, fontSize = 13.sp)
+            else -> Text("Loading…", color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
         }
     }
 
-    if (settings) SettingsDialog(onDismiss = { settings = false })
+    if (settings) {
+        SettingsDialog(
+            current = url,
+            onSave = { saved -> Repository.setGistUrl(context, saved); url = saved; settings = false },
+            onDismiss = { settings = false },
+        )
+    }
+}
+
+@Composable
+private fun Setup(onSave: (String) -> Unit) {
+    var value by remember { mutableStateOf("") }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Sync URL", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            "Run ./tools/publish-sync.py on the Mac and paste the raw gist URL it prints.",
+            color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp,
+        )
+        OutlinedTextField(
+            value = value,
+            onValueChange = { value = it },
+            label = { Text("https://gist.githubusercontent.com/…") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(onClick = { if (value.isNotBlank()) onSave(value.trim()) }) { Text("Save") }
+    }
 }
 
 @Composable
@@ -215,9 +258,8 @@ private fun Targets(snapshot: Snapshot, scenario: Account) {
 }
 
 @Composable
-private fun SettingsDialog(onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    var url by remember { mutableStateOf(Repository.gistUrl(context)) }
+private fun SettingsDialog(current: String, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    var url by remember { mutableStateOf(current) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Sync URL") },
@@ -225,9 +267,7 @@ private fun SettingsDialog(onDismiss: () -> Unit) {
             OutlinedTextField(value = url, onValueChange = { url = it }, singleLine = false,
                 label = { Text("raw gist URL") })
         },
-        confirmButton = {
-            TextButton(onClick = { Repository.setGistUrl(context, url); onDismiss() }) { Text("Save") }
-        },
+        confirmButton = { TextButton(onClick = { onSave(url.trim()) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
