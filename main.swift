@@ -976,26 +976,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         balanceItem.isHidden = false
         balanceDetailItem.isHidden = false
 
-        let line = NSMutableAttributedString()
-        line.append(icon("wallet.bifold.fill", color: .secondaryLabelColor, size: 11))
-        line.append(styled(String(format: "  %@  %@ %@", t("balance"), grouped(computed.equity), currency),
-                           size: 13, weight: .semibold, mono: true))
         let result = computed.unrealized + (UserDefaults.standard.object(forKey: "pnlOffset") as? Double ?? 0)
         let positive = result >= 0
         // Trading 212 quotes the result against account value, not against what was invested.
         let percent = computed.equity != 0 ? abs(result / computed.equity) * 100 : 0
-        line.append(styled(String(format: "   %@%@  (%.2f%%)", positive ? "+" : "−", grouped(abs(result)), percent),
-                           size: 12, weight: .medium, color: accentColor(up: positive), mono: true))
+
+        let line = NSMutableAttributedString()
+        line.append(icon("wallet.bifold.fill", color: .secondaryLabelColor, size: 12))
+        line.append(styled("  " + grouped(computed.equity) + " ", size: 16, weight: .semibold, mono: true))
+        line.append(styled(currency, size: 11, weight: .medium, color: .secondaryLabelColor))
+        line.append(styled("     " + signed(result), size: 13, weight: .semibold,
+                           color: accentColor(up: positive), mono: true))
+        line.append(styled(String(format: "  (%.2f%%)", percent), size: 11,
+                           color: accentColor(up: positive), mono: true))
         balanceItem.attributedTitle = line
 
-        let parts = [
-            "\(t("margin"))  \(grouped(computed.margin))",
-            "\(t("health"))  \(String(format: "%.0f%%", computed.health))",
-            "\(t("cash"))  \(grouped(computed.freeFunds))",
-        ]
         let detail = NSMutableAttributedString()
-        detail.append(styled(parts.joined(separator: "     ·     "),
-                             size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
+        detail.append(field(t("margin"), grouped(computed.margin), color: .secondaryLabelColor))
+        detail.append(field(t("health"), String(format: "%.0f%%", computed.health),
+                            color: computed.health < 40 ? .systemOrange : .labelColor))
+        detail.append(field(t("cash"), grouped(computed.freeFunds), color: .secondaryLabelColor))
 
         // The platform's own reading stays visible as a cross-check while it is live.
         var note = t("computed")
@@ -1023,15 +1023,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let overall = computed.equity - invested
         let up = overall >= 0
         let line = NSMutableAttributedString()
-        line.append(styled(String(format: "%@  %@", t("invested"), grouped(invested)),
-                           size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
-        line.append(styled(String(format: "     %@  ", t("lifetime")),
-                           size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
-        line.append(styled(String(format: "%@%@", up ? "+" : "−", grouped(abs(overall))),
-                           size: 12, weight: .semibold, color: accentColor(up: up), mono: true))
+        line.append(field(t("invested"), grouped(invested), color: .secondaryLabelColor))
+        line.append(styled(t("lifetime") + " ", size: 10, weight: .medium, color: .tertiaryLabelColor))
+        line.append(styled(signed(overall), size: 12, weight: .semibold,
+                           color: accentColor(up: up), mono: true))
         if invested > 0 {
             line.append(styled(String(format: "  (%+.1f%%)", overall / invested * 100),
-                               size: 11, color: accentColor(up: up), mono: true))
+                               size: 10, color: accentColor(up: up), mono: true))
         }
         lifetimeItem.attributedTitle = line
     }
@@ -1045,9 +1043,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let currency = portfolio?.accountCurrency ?? ""
         tpHeader.isHidden = false
-        tpHeader.attributedTitle = styled(t("atTarget"), size: 11, weight: .semibold, color: .secondaryLabelColor)
+        tpHeader.attributedTitle = styled(t("atTarget"), size: 10, weight: .semibold, color: .tertiaryLabelColor)
 
         let targets = takeProfit
+        let resultWidth = scenario.holdings.map { grouped($0.result).count }.max() ?? 10
         for (index, entry) in tpItems.enumerated() {
             guard index < scenario.holdings.count else {
                 entry.isHidden = true
@@ -1057,12 +1056,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             entry.isHidden = false
             let up = holding.result >= 0
             let line = NSMutableAttributedString()
-            line.append(styled(String(format: "%-6@", holding.symbol as NSString),
-                               size: 12, weight: .semibold, mono: true))
-            let target = targets[holding.symbol].map { String(format: "%g", $0) } ?? "—"
-            line.append(styled(String(format: "%8@   ", target as NSString),
-                               size: 11, color: .secondaryLabelColor, mono: true))
-            line.append(styled(String(format: "%@%@", up ? "+" : "−", grouped(abs(holding.result))),
+            line.append(styled(pad(holding.symbol, 7), size: 12, weight: .semibold, mono: true))
+            let target = targets[holding.symbol].map { "→ " + String(format: "%g", $0) } ?? "—"
+            line.append(styled(pad(target, 10), size: 11, color: .secondaryLabelColor, mono: true))
+            line.append(styled(pad(signed(holding.result), resultWidth + 2, right: true),
                                size: 12, weight: .semibold, color: accentColor(up: up), mono: true))
             entry.attributedTitle = line
         }
@@ -1071,28 +1068,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let up = scenario.result >= 0
         let delta = scenario.equity - computed.equity
         let total = NSMutableAttributedString()
-        total.append(icon("target", color: .secondaryLabelColor, size: 11))
-        total.append(styled(String(format: "  %@  %@ %@", t("balance"), grouped(scenario.equity), currency),
-                            size: 13, weight: .semibold, mono: true))
-        total.append(styled(String(format: "   %@%@", up ? "+" : "−", grouped(abs(scenario.result))),
-                            size: 12, weight: .medium, color: accentColor(up: up), mono: true))
-        total.append(styled(String(format: "   \(t("health")) %.0f%%   \(t("cash")) %@   \(t("upside")) +%@",
-                                   scenario.health, grouped(scenario.freeFunds), grouped(max(delta, 0))),
-                            size: 11, color: .secondaryLabelColor, mono: true))
+        total.append(icon("target", color: .secondaryLabelColor, size: 12))
+        total.append(styled("  " + grouped(scenario.equity) + " ", size: 15, weight: .semibold, mono: true))
+        total.append(styled(currency, size: 11, weight: .medium, color: .secondaryLabelColor))
+        total.append(styled("     " + signed(scenario.result) + "      ", size: 13, weight: .semibold,
+                            color: accentColor(up: up), mono: true))
+        total.append(field(t("health"), String(format: "%.0f%%", scenario.health), color: .secondaryLabelColor))
+        total.append(field(t("cash"), grouped(scenario.freeFunds), color: .secondaryLabelColor))
+        total.append(field(t("upside"), signed(delta), color: accentColor(up: delta >= 0)))
 
         let invested = netDeposits
         if invested != 0 {
             let overall = scenario.equity - invested
-            let overallUp = overall >= 0
-            total.append(styled(String(format: "   %@ ", t("lifetime")), size: 11, color: .secondaryLabelColor))
-            total.append(styled(String(format: "%@%@", overallUp ? "+" : "−", grouped(abs(overall))),
-                                size: 11, weight: .semibold, color: accentColor(up: overallUp), mono: true))
+            total.append(field(t("lifetime"), signed(overall), color: accentColor(up: overall >= 0)))
         }
         tpTotalItem.attributedTitle = total
     }
 
     // Per-symbol totals, the same three rows the platform shows under each instrument.
     func renderHoldings(_ holdings: [Holding]) {
+        let resultWidth = holdings.map { grouped($0.result).count }.max() ?? 10
         for (index, entry) in holdingItems.enumerated() {
             guard index < holdings.count else {
                 entry.isHidden = true
@@ -1103,15 +1098,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let up = holding.result >= 0
             let line = NSMutableAttributedString()
-            line.append(styled(String(format: "%-6@", holding.symbol as NSString),
-                               size: 12, weight: .semibold, mono: true))
-            line.append(styled(String(format: "%3d %@   ", holding.lots, t("lots")),
+            line.append(styled(pad(holding.symbol, 7), size: 12, weight: .semibold, mono: true))
+            line.append(styled(pad("\(holding.lots) \(t("lots"))", 10),
                                size: 10, color: .tertiaryLabelColor, mono: true))
-            line.append(styled(String(format: "%@%@", up ? "+" : "−", grouped(abs(holding.result))),
+            line.append(styled(pad(signed(holding.result), resultWidth + 2, right: true) + "      ",
                                size: 12, weight: .semibold, color: accentColor(up: up), mono: true))
-            line.append(styled(String(format: "   \(t("value")) %@   \(t("margin")) %@",
-                                      grouped(holding.value), grouped(holding.margin)),
-                               size: 11, color: .secondaryLabelColor, mono: true))
+            line.append(field(t("value"), grouped(holding.value), color: .secondaryLabelColor))
+            line.append(field(t("margin"), grouped(holding.margin), color: .secondaryLabelColor))
             entry.attributedTitle = line
         }
     }
@@ -1173,6 +1166,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             segment.append(styled(" " + arrow, size: 10, weight: .bold, color: accent))
         }
         return segment
+    }
+
+    // Columns are padded by hand: these lines mix label and number weights, and a
+    // monospaced digit font only lines up the digits, not the words between them.
+    func pad(_ text: String, _ width: Int, right: Bool = false) -> String {
+        let spaces = String(repeating: " ", count: max(0, width - text.count))
+        return right ? spaces + text : text + spaces
+    }
+
+    func signed(_ value: Double) -> String { (value >= 0 ? "+" : "−") + grouped(abs(value)) }
+
+    /// A muted label followed by its value, with even spacing after it.
+    func field(_ label: String, _ value: String, color: NSColor = .labelColor) -> NSAttributedString {
+        let part = NSMutableAttributedString()
+        part.append(styled(label + " ", size: 10, weight: .medium, color: .tertiaryLabelColor))
+        part.append(styled(value + "     ", size: 12, weight: .medium, color: color, mono: true))
+        return part
     }
 
     func grouped(_ value: Double) -> String {
