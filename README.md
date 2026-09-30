@@ -78,6 +78,35 @@ The `extension/` folder holds a Chrome extension that reads the CFD account summ
 
 Nothing is scraped by the widget itself and nothing leaves the machine — see `extension/README.md`.
 
+## Computed account figures
+
+Trading 212's CFD platform only updates while its own session is open — after the close its balance, margin and health freeze until the next morning. The widget therefore computes them itself from Yahoo prices, which keep running through pre-market, after-hours and overnight.
+
+Generate the positions file from a Trading 212 CSV export (History → Export):
+
+```bash
+./tools/t212-positions.py ~/Downloads/from_2026-01-01_to_2026-09-30_*.csv
+```
+
+This writes `positions.json` next to the app: open positions with their units, average entry price and leverage, plus the account cash excluding open-position P/L. Re-run it whenever you open or close positions — an export is a snapshot, not a feed.
+
+The arithmetic mirrors the platform's own:
+
+```
+unrealised = Σ  sign · units · (price − entry) · fx
+margin     = Σ  units · price · fx / leverage
+equity     = cash + unrealised
+health     = equity < margin  ?  equity / margin × 50
+                             :  equity / (equity + margin) × 100
+free funds = max(equity − margin, 0)
+```
+
+The two-branch health formula is Trading 212's [account margin status](https://helpcentre.trading212.com/hc/en-us/articles/360007119457-What-does-my-account-margin-status-show); both branches meet at 50%. A margin call email goes out at 45% and positions start closing at 25%.
+
+Cash is the one input an export cannot keep current, so it is re-pinned automatically: whenever a live reading arrives from the browser extension, cash is set to that equity minus the unrealised P/L computed at the same moment. Between market sessions the widget carries that cash forward and only the prices move.
+
+Accuracy against the platform's own figures is within roughly a percent — Trading 212 prices longs at the bid and uses its own FX mid-rate, Yahoo gives neither exactly. Validated against a live screenshot: computed result −445.9k vs −447.3k shown, health 32.5% vs 32% shown.
+
 ## License
 
 MIT
