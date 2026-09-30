@@ -62,10 +62,21 @@ def parse(path):
 
     account_currency = next((r["Account currency"] for r in rows if r["Account currency"]), "CZK")
 
+    # Money in and out of this account. A CFD export only sees what reached the CFD side,
+    # so the platform's own History screen (which spans the whole account) can differ —
+    # the widget lets you override the net figure.
+    deposits = sum(float(r["Amount (account currency)"]) for r in rows
+                   if r["Record Type"] == "Transaction" and r["Transaction type"] == "Deposit")
+    withdrawals = sum(float(r["Amount (account currency)"]) for r in rows
+                      if r["Record Type"] == "Transaction" and r["Transaction type"] == "Withdrawal")
+
     return {
         "generated": datetime.now().astimezone().isoformat(timespec="seconds"),
         "accountCurrency": account_currency,
         "cashFallback": round(cash, 2),
+        "deposits": round(deposits, 2),
+        "withdrawals": round(withdrawals, 2),
+        "netDeposits": round(deposits + withdrawals, 2),
         "positions": [
             {
                 "symbol": symbol,
@@ -95,6 +106,8 @@ def main():
         print(f"  {p['symbol']:6} {p['direction']:4} {p['units']:>12,.2f} units  avg {p['avgPrice']:.4f} {p['currency']}"
               f"  ({p['lots']} lots, 1:{p['leverage']:.0f}, spread {p['spread']})")
     print(f"  cash fallback {data['cashFallback']:,.2f} {data['accountCurrency']}")
+    print(f"  deposits {data['deposits']:,.2f}  withdrawals {data['withdrawals']:,.2f}"
+          f"  net {data['netDeposits']:,.2f}")
 
 
 if __name__ == "__main__":
