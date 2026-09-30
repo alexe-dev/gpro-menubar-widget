@@ -95,14 +95,19 @@ While Trading 212's own session is open and the tab is live, its figures are sho
 The arithmetic mirrors the platform's own:
 
 ```
-closing    = last − sign · spread / 2          # a long closes at the bid
-unrealised = Σ  sign · units · (closing − entry) · fx
-margin     = Σ  units · price · fx / leverage
-equity     = cash + unrealised
+bid        = last − sign · spread / 2         # the side a position closes at
+ask        = last + sign · spread / 2         # the side it is margined at
+value      = Σ  units · bid · fx
+margin     = Σ  units · ask · fx / leverage
+p/l        = Σ  sign · units · (bid − entry) · fx
+result     = p/l − 0.5% · |p/l|               # Trading 212's FX fee
+equity     = cash + result
 health     = equity < margin  ?  equity / margin × 50
                              :  equity / (equity + margin) × 100
 free funds = max(equity − margin, 0)
 ```
+
+Overnight interest is not part of the result — it is charged to cash daily, and the platform lists it separately. The dropdown also breaks the result down per symbol, the same rows Trading 212 shows under each instrument: result, value and margin.
 
 The two-branch health formula is Trading 212's [account margin status](https://helpcentre.trading212.com/hc/en-us/articles/360007119457-What-does-my-account-margin-status-show); both branches meet at 50%. A margin call email goes out at 45% and positions start closing at 25%.
 
@@ -112,7 +117,7 @@ Cash is the one input an export cannot keep current, so it is re-pinned automati
 
 Cash is only re-pinned during the regular session. Outside it the platform's numbers are frozen at the close, and calibrating against them would drag the computed equity back to that frozen figure — defeating the point.
 
-Accuracy against the platform, measured on a closed market: result −324.9k vs −322.3k shown (0.8%), margin 741.9k vs 747.0k (0.7%), health 50.4% vs 51%. What remains is Trading 212's own FX mid-rate and the exact bid at their last tick.
+Accuracy against the platform, measured per symbol on a closed market: value, margin, p/l, FX fee and result all land within **0.03%** of the figures Trading 212 shows. The FX rate it uses turns out to be the market one — `USDCZK=X` reproduced its totals to four digits.
 
 ## License
 
