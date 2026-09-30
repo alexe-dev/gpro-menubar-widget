@@ -1,5 +1,6 @@
 import Cocoa
 import Network
+import SwiftUI
 
 // Symbol resolution: saved choice → TICKER env var → GPRO.
 var symbol: String {
@@ -310,6 +311,7 @@ let strings: [String: (String, String)] = [
     "result": ("Результат", "Result"),
     "lots": ("поз.", "pos."),
     "tp": ("Цели (TP)", "Targets (TP)"),
+    "dashboard": ("Окно счёта", "Dashboard"),
     "tpSetTitle": ("Цены целей", "Target prices"),
     "tpSetInfo": ("Цена закрытия позиции: для лонга это bid. Пусто — без цели.",
                   "The price a position closes at — the bid for a long. Empty means no target."),
@@ -397,6 +399,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let tpTotalItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var tpMenuItem = NSMenuItem()
     var depositsItem = NSMenuItem()
+    var dashboardItem = NSMenuItem()
+    var dashboardWindow: NSWindow?
     let lifetimeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let balancePort: UInt16 = UInt16(ProcessInfo.processInfo.environment["BALANCE_PORT"] ?? "") ?? 47632
     var lastQuote: Quote?
@@ -484,6 +488,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         symbolItem2 = NSMenuItem(title: "", action: #selector(changeSymbol2), keyEquivalent: "d")
         symbolItem2.target = self
         menu.addItem(symbolItem2)
+        dashboardItem = NSMenuItem(title: "", action: #selector(showDashboard), keyEquivalent: "0")
+        dashboardItem.target = self
+        menu.addItem(dashboardItem)
         depositsItem = NSMenuItem(title: "", action: #selector(editDeposits), keyEquivalent: "n")
         depositsItem.target = self
         menu.addItem(depositsItem)
@@ -541,6 +548,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         portfolio = Portfolio.load()
         refreshPortfolio()
 
+        NotificationCenter.default.addObserver(self, selector: #selector(settingsChanged),
+                                               name: .settingsChanged, object: nil)
+
         // The Chrome extension pushes the Trading 212 balance here; the widget never scrapes anything itself.
         balanceServer = BalanceServer { [weak self] balance in
             DispatchQueue.main.async {
@@ -570,6 +580,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         percentItem.title = t("showPercent")
         tpMenuItem.title = t("tp")
         depositsItem.title = t("setDeposits")
+        dashboardItem.title = t("dashboard")
         refreshItem.title = t("refresh")
         webItem.title = t("openWeb")
         languageItem.title = t("language")
@@ -661,6 +672,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    @objc func showDashboard() {
+        if let window = dashboardWindow {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 620),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
+        window.title = "\(symbol) · \(symbol2)"
+        window.titlebarAppearsTransparent = true
+        window.contentViewController = NSHostingController(rootView: DashboardView())
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        dashboardWindow = window
+
+        // The app has no Dock icon while only the menu bar is up; a window needs one.
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        pushDashboard()
+    }
+
+    func pushDashboard() {
+        var quotes: [(String, Quote)] = []
+        if let q = lastQuote { quotes.append((symbol, q)) }
+        if let q = lastQuote2 { quotes.append((symbol2, q)) }
+        DashboardModel.shared.push(quotes: quotes, computed: computed, balance: balance, portfolio: portfolio)
+    }
+
+    @objc func settingsChanged() {
+        applyLanguage()
+        lastQuote = nil
+        lastQuote2 = nil
+        priceCache.removeAll()
+        dashboardWindow?.title = "\(symbol) · \(symbol2)"
+        refresh()
+        refreshNews()
+        refreshPortfolio()
     }
 
     @objc func editDeposits() {
@@ -827,6 +883,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let q = quote ?? lastQuote2 else { return }
         lastQuote2 = q
         renderQuoteBlock(ticker: symbol2, quote: q, slot: 1)
+        pushDashboard()
         if lastQuote != nil { render(lastQuote) }   // the title carries both quotes
     }
 
@@ -1005,6 +1062,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detail.append(styled("   " + note, size: 10, color: .tertiaryLabelColor))
         balanceDetailItem.attributedTitle = detail
 
+        pushDashboard()
         renderLifetime(computed)
         renderHoldings(computed.holdings)
         renderScenario(computed)
@@ -1327,6 +1385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.attributedTitle = title
 
         renderQuoteBlock(ticker: symbol, quote: q, slot: 0)
+        pushDashboard()
     }
 
     // One shape for both symbols: price line, instrument line, then the numbers.
@@ -1452,6 +1511,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 weekHigh: meta["fiftyTwoWeekHigh"] as? Double ?? 0,
                 tickTime: Date(timeIntervalSince1970: lastStamp)))
         }.resume()
+    }
+}
+
+extension AppDelegate: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        // Back to a menu-bar-only app once the window is gone.
+        NSApp.setActivationPolicy(.accessory)
     }
 }
 
