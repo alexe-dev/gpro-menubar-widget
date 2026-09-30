@@ -13,8 +13,9 @@ data class Snapshot(
 )
 
 object Repository {
-    const val DEFAULT_GIST =
-        "https://gist.githubusercontent.com/alexe-dev/c47be2b5d669d06ec4aaeb2b055f43fa/raw/gpro-sync.json"
+    // Deliberately empty: a secret gist is unlisted, not private, so its URL is a
+    // credential and must not live in a public repository. It is entered on the device.
+    const val DEFAULT_GIST = ""
 
     private const val PREFS = "gpro"
     private const val KEY_GIST = "gist"

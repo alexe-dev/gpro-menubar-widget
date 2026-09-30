@@ -17,8 +17,12 @@ it knows into a **private gist** and the phone reads that:
 
 The payload carries the open positions, the platform-calibrated cash, deposits, targets and
 the tracked symbols. Re-run it after trading, after changing targets, or whenever the cash
-has been re-pinned. The gist URL is built into the app and can be changed by tapping the
-sync line at the bottom of the screen.
+has been re-pinned.
+
+**The gist URL is a credential.** A secret gist is unlisted, not private: anyone holding the
+URL can read the account figures, so it is never committed. `publish-sync.py` prints it —
+enter it on the phone by tapping the sync line at the bottom of the screen. If it ever leaks,
+delete the gist (`gh gist delete <id>`) and publish again; the old URL dies with it.
 
 ## Building
 
