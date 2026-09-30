@@ -30,7 +30,9 @@ object Repository {
     }
 
     suspend fun load(context: Context): Snapshot = withContext(Dispatchers.IO) {
-        val sync = Api.sync(gistUrl(context))
+        val url = gistUrl(context)
+        require(url.isNotBlank()) { "Set the sync URL first" }
+        val sync = Api.sync(url)
 
         val tickers = (sync.symbols + sync.positions.map { it.symbol }).distinct()
         val quotes = tickers.map { Api.quote(it) }
