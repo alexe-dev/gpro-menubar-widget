@@ -25,9 +25,12 @@ sync line at the bottom of the screen.
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
-cd android && gradle assembleRelease
+cd android && ./gradlew assembleRelease
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
+
+The wrapper pins Gradle 8.11.1: the Homebrew Gradle (9.x) is newer than the Android plugin
+expects and fails to resolve it.
 
 The release build is signed with the debug key — this is a personal build, not a store upload.
 

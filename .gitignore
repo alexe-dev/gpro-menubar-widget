@@ -3,3 +3,8 @@ GPRO.app/Contents/MacOS/
 .DS_Store
 icon.iconset/
 *.dmg
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+.gist-id

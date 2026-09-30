@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -81,16 +82,13 @@ private fun Screen() {
             Text(
                 "sync ${current.sync.generated.take(16).replace('T', ' ')}",
                 color = Color.White.copy(alpha = 0.3f), fontSize = 10.sp,
-                modifier = Modifier.clickableSettings { settings = true },
+                modifier = Modifier.clickable { settings = true },
             )
         }
     }
 
     if (settings) SettingsDialog(onDismiss = { settings = false })
 }
-
-private fun Modifier.clickableSettings(onClick: () -> Unit): Modifier =
-    androidx.compose.foundation.clickable(this) { onClick() }
 
 @Composable
 private fun Hero(snapshot: Snapshot) {
