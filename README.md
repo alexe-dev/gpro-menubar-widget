@@ -43,6 +43,8 @@ The menu bar shows both quotes in order, primary first. The dropdown gives the p
 
 **Language** — English or Russian, switchable from the menu. English by default, the choice is remembered.
 
+**Menu bar contents** — each piece can be switched off in the settings window: any of the three quotes, the health reading and the overall figure. Switching everything off leaves the ticker name alone, so the item stays clickable.
+
 Environment variables:
 
 | Variable | Default | Description |

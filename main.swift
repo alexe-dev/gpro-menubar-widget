@@ -59,6 +59,18 @@ var computeFromExport: Bool {
     set { UserDefaults.standard.set(newValue, forKey: "computeFromExport") }
 }
 
+/// Which pieces the menu bar carries. Space up there is shared with every other app,
+/// so each one can be dropped on its own.
+enum TitlePart: String, CaseIterable {
+    case first = "showFirst", second = "showSecond", third = "showThird"
+    case health = "showHealth", total = "showTotal"
+
+    var isOn: Bool {
+        get { UserDefaults.standard.object(forKey: rawValue) as? Bool ?? true }
+        nonmutating set { UserDefaults.standard.set(newValue, forKey: rawValue) }
+    }
+}
+
 let fxFeeRate = 0.005   // Trading 212 charges 0.5% of the result as an FX fee
 let refreshInterval: TimeInterval = Double(ProcessInfo.processInfo.environment["REFRESH"] ?? "") ?? 5
 
@@ -1459,15 +1471,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Title: both quotes bare, then one session mark — both symbols share the same
         // market hours. Which price is which is settled by the order, same as in the menu.
         let title = NSMutableAttributedString()
-        title.append(quoteSegment(q, accent: accent, arrow: arrow))
-        for extra in [lastQuote2, lastQuote3].compactMap({ $0 }) {
-            let rising = extra.changePercent >= 0
-            title.append(NSAttributedString(string: "   "))
-            title.append(quoteSegment(extra, accent: accentColor(up: rising), arrow: rising ? "▲" : "▼"))
+        if TitlePart.first.isOn {
+            title.append(quoteSegment(q, accent: accent, arrow: arrow))
         }
-        let mark = sessionIcon(q.session)
-        title.append(NSAttributedString(string: "  "))
-        title.append(icon(mark.symbol, color: mark.color, size: 10))
+        let extras = [(lastQuote2, TitlePart.second), (lastQuote3, TitlePart.third)]
+        for (quote, part) in extras {
+            guard part.isOn, let quote = quote else { continue }
+            let rising = quote.changePercent >= 0
+            if title.length > 0 { title.append(NSAttributedString(string: "   ")) }
+            title.append(quoteSegment(quote, accent: accentColor(up: rising), arrow: rising ? "▲" : "▼"))
+        }
+        // The session mark belongs to the quotes; without them it has nothing to qualify.
+        if TitlePart.first.isOn || TitlePart.second.isOn || TitlePart.third.isOn {
+            let mark = sessionIcon(q.session)
+            title.append(NSAttributedString(string: "  "))
+            title.append(icon(mark.symbol, color: mark.color, size: 10))
+        }
         // The account total rides along after the session mark: same weight as the price
         // so it reads as a second figure, with a small "k" that stays out of the way.
         // Age is flagged with a mark rather than by dimming — a number worth showing is
@@ -1488,7 +1507,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let healthPercent = platformLive
             ? balance?.health
             : (computed.map { String(format: "%.0f%%", $0.health) } ?? balance?.health)
-        if let headline = headline {
+        if let headline = headline, TitlePart.total.isOn {
             // The overall figure is signed and coloured; a bare equity is not.
             let overall = invested != 0
             title.append(NSAttributedString(string: "  "))
@@ -1496,20 +1515,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 size: 13, weight: .semibold,
                                 color: overall ? accentColor(up: headline >= 0) : .labelColor, mono: true))
             title.append(styled("k", size: 10, weight: .medium, color: .secondaryLabelColor))
+        }
 
-            // Health is the number that matters when it drops, so it is colored by level.
-            if let health = healthPercent {
-                let level = Double(health.filter("0123456789.".contains)) ?? 100
-                let color: NSColor = level < 20
-                    ? NSColor(srgbRed: 0.72, green: 0.20, blue: 0.18, alpha: 1)
-                    : level < 40 ? NSColor(srgbRed: 0.72, green: 0.44, blue: 0.05, alpha: 1)
-                    : .labelColor
-                title.append(NSAttributedString(string: "  "))
-                title.append(icon("heart.fill", color: color, size: 9))
-                title.append(styled(" " + health, size: 12, weight: .semibold, color: color, mono: true))
-            }
+        // Health is the number that matters when it drops, so it is colored by level.
+        if let health = healthPercent, TitlePart.health.isOn {
+            let level = Double(health.filter("0123456789.".contains)) ?? 100
+            let color: NSColor = level < 20
+                ? NSColor(srgbRed: 0.72, green: 0.20, blue: 0.18, alpha: 1)
+                : level < 40 ? NSColor(srgbRed: 0.72, green: 0.44, blue: 0.05, alpha: 1)
+                : .labelColor
+            title.append(NSAttributedString(string: "  "))
+            title.append(icon("heart.fill", color: color, size: 9))
+            title.append(styled(" " + health, size: 12, weight: .semibold, color: color, mono: true))
+        }
 
-            // Computed figures never go stale: they follow the Yahoo quotes.
+        // Computed figures never go stale: they follow the Yahoo quotes.
+        if TitlePart.total.isOn || TitlePart.health.isOn {
             let account = balance
             let ageing = computed == nil && (account.map { Date().timeIntervalSince($0.received) > 90 } ?? false)
             if ageing || (computed == nil && account?.hidden == true) {
@@ -1517,6 +1538,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 title.append(icon(ageing ? "clock.badge.exclamationmark.fill" : "zzz",
                                   color: .systemOrange, size: 9))
             }
+        }
+
+        // Everything can be switched off; an empty status item would be unclickable.
+        if title.length == 0 {
+            title.append(styled(symbol, size: 12, weight: .semibold, color: .secondaryLabelColor))
         }
         item.button?.attributedTitle = title
 
