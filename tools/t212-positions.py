@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Turn a Trading 212 CSV export into the positions file the widget calculates from.
+"""Turn Trading 212 CSV exports into the positions file the widget calculates from.
 
-    ./tools/t212-positions.py ~/Downloads/from_2026-01-01_to_2026-09-30_*.csv
+    ./tools/t212-positions.py ~/Downloads/from_2026-01-01_to_*.csv ~/Downloads/from_2026-09-30_to_*.csv
 
-Writes positions.json next to the app. Re-run it after opening or closing positions:
-the export is a snapshot, not a feed.
+Several exports can be passed at once and are merged: a later export only covers its own
+window, so the earlier ones still hold the positions opened before it. Overlapping days are
+deduplicated. Writes positions.json next to the app — re-run after trading, since an export
+is a snapshot rather than a feed.
 """
 import csv
 import json
@@ -18,11 +20,20 @@ LEVERAGE = 5.0   # 1:5 on equity CFDs; override per symbol below if yours differ
 # Trading 212 values a long at the bid while Yahoo reports the last trade, which sits
 # near the mid — on a wide spread that difference is real money. Read SELL/BUY off the
 # instrument page and put the difference here.
-SPREADS = {"GPRO": 0.03, "KOD": 0.14}
+SPREADS = {"GPRO": 0.03, "KOD": 0.14}   # read SELL/BUY off the instrument page
 
 
-def parse(path):
-    rows = list(csv.DictReader(open(path)))
+def parse(paths):
+    # Exports overlap at their boundaries, so identical rows are collapsed.
+    seen = set()
+    rows = []
+    for path in paths:
+        for row in csv.DictReader(open(path)):
+            key = tuple(row.items())
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(row)
 
     closed = {r["Position ID"] for r in rows if r["Record Type"] == "Closed position"}
     live = [
@@ -87,8 +98,8 @@ def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
 
-    data = parse(sys.argv[1])
-    out = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(__file__).resolve().parent.parent / "positions.json"
+    data = parse(sys.argv[1:])
+    out = Path(__file__).resolve().parent.parent / "positions.json"
     out.write_text(json.dumps(data, indent=2) + "\n")
 
     print(f"{out}")
