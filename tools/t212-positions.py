@@ -21,6 +21,11 @@ LEVERAGE = 5.0   # 1:5 on equity CFDs; override per symbol below if yours differ
 # the mid — on a wide spread that difference is real money. Held as a fraction of price,
 # since the absolute spread moves with the quote: read SELL/BUY off the instrument page and
 # divide the difference by the mid.
+# Instruments whose CFD trades in extended hours. For the rest the platform holds the
+# regular close until its own session opens, so valuing them at a pre-market price would
+# invent movement the account does not have.
+EXTENDED_HOURS = {"MU"}
+
 SPREADS = {
     "GPRO": 0.0230,   # 1.29 / 1.32
     "KOD": 0.0015,    # 91.04 / 91.18
@@ -92,6 +97,7 @@ def parse(paths):
                 "currency": book["currency"],
                 "leverage": LEVERAGE,
                 "spreadPct": SPREADS.get(symbol, 0.0),
+                "extendedHours": symbol in EXTENDED_HOURS,
                 "lots": book["count"],
             }
             for symbol, book in sorted(books.items())
@@ -110,7 +116,8 @@ def main():
     print(f"{out}")
     for p in data["positions"]:
         print(f"  {p['symbol']:6} {p['direction']:4} {p['units']:>12,.2f} units  avg {p['avgPrice']:.4f} {p['currency']}"
-              f"  ({p['lots']} lots, 1:{p['leverage']:.0f}, spread {p['spreadPct'] * 100:.2f}%)")
+              f"  ({p['lots']} lots, 1:{p['leverage']:.0f}, spread {p['spreadPct'] * 100:.2f}%"
+              f"{', extended hours' if p['extendedHours'] else ''})")
     print(f"  cash fallback {data['cashFallback']:,.2f} {data['accountCurrency']}")
     print("  deposits and withdrawals are entered in the widget (⌘N): a CFD export does not"
           " see money moved in from the Invest side")

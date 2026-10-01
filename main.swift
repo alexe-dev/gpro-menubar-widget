@@ -103,6 +103,7 @@ struct Position {
     let leverage: Double
     let spreadPct: Double     // platform bid/ask width as a fraction of price
     let lots: Int
+    let extendedHours: Bool   // does its CFD trade outside the regular session
 
     var sign: Double { direction.lowercased() == "sell" ? -1 : 1 }
 
@@ -159,7 +160,8 @@ struct Portfolio {
                 currency: entry["currency"] as? String ?? "USD",
                 leverage: entry["leverage"] as? Double ?? 5,
                 spreadPct: entry["spreadPct"] as? Double ?? 0,
-                lots: entry["lots"] as? Int ?? 1)
+                lots: entry["lots"] as? Int ?? 1,
+                extendedHours: entry["extendedHours"] as? Bool ?? false)
         }
         guard !positions.isEmpty else { return nil }
 
@@ -421,7 +423,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let balanceDetailItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var balance: Balance?
     var portfolio: Portfolio?
-    var priceCache: [String: Double] = [:]
+    var priceCache: [String: Quote] = [:]
     var fxCache: [String: Double] = [:]
     var computed: Computed?
     var lastComputeLog = Date.distantPast
@@ -1047,7 +1049,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for ticker in symbols {
             group.enter()
             fetch(ticker) { [weak self] quote in
-                if let quote = quote { self?.priceCache[ticker] = quote.price }
+                if let quote = quote { self?.priceCache[ticker] = quote }
                 group.leave()
             }
         }
@@ -1059,6 +1061,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         group.notify(queue: .main) { [weak self] in self?.recompute() }
+    }
+
+    /// What the platform would price this position at right now: its own quote while the
+    /// instrument's CFD session is open, the regular close while it is shut. Valuing a
+    /// closed instrument at a pre-market price invents movement the account does not have.
+    func basisPrice(for position: Position, quote: Quote) -> Double {
+        if position.extendedHours || quote.session == .regular { return quote.price }
+        return quote.regularPrice
     }
 
     func rate(from currency: String) -> Double? {
@@ -1074,8 +1084,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var unrealized = 0.0, notional = 0.0, margin = 0.0, priced = 0
         var holdings: [Holding] = []
         for position in portfolio.positions {
-            guard let price = priceCache[position.symbol],
+            guard let quote = priceCache[position.symbol],
                   let fx = rate(from: position.currency) else { continue }
+            let price = basisPrice(for: position, quote: quote)
             priced += 1
 
             // A position is valued at the price it would close at and margined at the other
@@ -1100,8 +1111,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !targets.isEmpty {
             var sResult = 0.0, sMargin = 0.0, sHoldings: [Holding] = []
             for position in portfolio.positions {
-                guard let price = priceCache[position.symbol],
+                guard let quote = priceCache[position.symbol],
                       let fx = rate(from: position.currency) else { continue }
+                let price = basisPrice(for: position, quote: quote)
                 let closing = targets[position.symbol] ?? position.closingPrice(from: price)
                 // A target is the price a position closes at, so the other side of the
                 // spread sits a full width above it.
@@ -1150,11 +1162,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // from theirs. They value longs at the bid and fold overnight interest into the result,
     // so the gap is a near-constant offset rather than noise.
     func calibrateCash(from balance: Balance) {
-        // Only while the CFD market is actually open. Outside the session the platform's
-        // figures are frozen at the close, and pinning cash to them would drag our own
-        // equity back to that frozen number — exactly what this calculation exists to avoid.
-        guard lastQuote?.session == .regular else { return }
+        // Only while the platform's own number is moving. Frozen at the close it would drag
+        // our equity back to that stale figure; and whether it moves depends on the
+        // instruments held, not on one symbol's session — a position with extended hours
+        // keeps the account live when the rest of the book is shut.
         guard !balance.hidden, let computed = computed else { return }
+        let previous = UserDefaults.standard.object(forKey: "lastPlatformValue") as? Double
+        guard previous == nil || abs(balance.value - previous!) > 0.01 else { return }
+        UserDefaults.standard.set(balance.value, forKey: "lastPlatformValue")
         UserDefaults.standard.set(balance.value - computed.unrealized, forKey: "cashCalibrated")
         if let platformPnl = balance.pnl {
             UserDefaults.standard.set(platformPnl - computed.unrealized, forKey: "pnlOffset")
@@ -1164,16 +1179,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func renderBalance(_ balance: Balance?) {
         if let balance = balance { self.balance = balance }
 
-        // While the platform is live it is the authority — those are the numbers the account
-        // actually trades on. The moment its session closes or the tab goes away, its figures
-        // freeze, so the Yahoo-based calculation takes over.
-        let platformLive = self.balance.map { account in
-            !account.hidden
-                && Date().timeIntervalSince(account.received) <= 90
-                && lastQuote?.session == .regular
-        } ?? false
-
-        guard computeFromExport, let computed = computed, !platformLive else {
+        // With the calculation on, it is what gets shown: the platform reading still arrives
+        // and still pins the cash, but it is no longer what the numbers are read from.
+        guard computeFromExport, let computed = computed else {
             renderScrapedOnly()
             return
         }
@@ -1505,22 +1513,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // so it reads as a second figure, with a small "k" that stays out of the way.
         // Age is flagged with a mark rather than by dimming — a number worth showing is
         // worth showing legibly.
-        let platformLive = balance.map { account in
-            !account.hidden
-                && Date().timeIntervalSince(account.received) <= 90
-                && q.session == .regular
-        } ?? false
         // The menu bar carries the overall figure — equity against the money put in —
         // since that is the number worth glancing at; the equity itself lives in the menu.
+        // With the calculation on it is the only source; the tab just pins the cash.
+        let usingComputed = computeFromExport && computed != nil
         let invested = netDeposits
-        let equity = platformLive ? balance?.value : (computed?.equity ?? balance?.value)
+        let equity = usingComputed ? computed?.equity : balance?.value
         // Same meaning all day: whichever source is live, the title shows equity minus
         // the money put in. A field that silently changes meaning at the open is worse
         // than either figure on its own.
         let headline = invested != 0 ? equity.map { $0 - invested } : equity
-        let healthPercent = platformLive
-            ? balance?.health
-            : (computed.map { String(format: "%.0f%%", $0.health) } ?? balance?.health)
+        let healthPercent = usingComputed
+            ? computed.map { String(format: "%.0f%%", $0.health) }
+            : balance?.health
         if let headline = headline, TitlePart.total.isOn {
             // The overall figure is signed and coloured; a bare equity is not.
             let overall = invested != 0
