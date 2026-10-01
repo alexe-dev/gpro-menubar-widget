@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var targets: [String: String] = takeProfit.mapValues { String(format: "%g", $0) }
     @State private var russian = Lang.current == .ru
     @State private var percentInTitle = showPercent
+    @State private var parts = TitlePart.allCases.reduce(into: [String: Bool]()) { $0[$1.rawValue] = $1.isOn }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -58,6 +59,13 @@ struct SettingsView: View {
                     }
 
                     section("Menu bar") {
+                        Toggle(primary.isEmpty ? "First symbol" : primary, isOn: part(.first))
+                        Toggle(secondary.isEmpty ? "Second symbol" : secondary, isOn: part(.second))
+                        Toggle(third.isEmpty ? "Third symbol" : third, isOn: part(.third))
+                            .disabled(third.isEmpty)
+                        Toggle("Health", isOn: part(.health))
+                        Toggle("Overall", isOn: part(.total))
+                        Divider().padding(.vertical, 2)
                         Toggle("Show percentages", isOn: $percentInTitle)
                         Toggle("Russian interface", isOn: $russian)
                     }
@@ -84,6 +92,10 @@ struct SettingsView: View {
             .padding(16)
         }
         .frame(width: 420, height: 560)
+    }
+
+    private func part(_ part: TitlePart) -> Binding<Bool> {
+        Binding(get: { parts[part.rawValue] ?? true }, set: { parts[part.rawValue] = $0 })
     }
 
     private func binding(for ticker: String) -> Binding<String> {
@@ -126,6 +138,7 @@ struct SettingsView: View {
         withdrawalsTotal = number(withdrawals).map(abs) ?? 0
         takeProfit = targets.compactMapValues { number($0) }.filter { $0.value > 0 }
         showPercent = percentInTitle
+        TitlePart.allCases.forEach { $0.isOn = parts[$0.rawValue] ?? true }
         Lang.current = russian ? .ru : .en
 
         NotificationCenter.default.post(name: .settingsChanged, object: nil)
