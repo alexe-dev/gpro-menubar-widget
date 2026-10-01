@@ -63,6 +63,7 @@ struct SettingsView: View {
                         Toggle(secondary.isEmpty ? "Second symbol" : secondary, isOn: part(.second))
                         Toggle(third.isEmpty ? "Third symbol" : third, isOn: part(.third))
                             .disabled(third.isEmpty)
+                        Toggle("Session mark", isOn: part(.session))
                         Toggle("Health", isOn: part(.health))
                         Toggle("Overall", isOn: part(.total))
                         Divider().padding(.vertical, 2)
