@@ -24,12 +24,13 @@ LEVERAGE = 5.0   # 1:5 on equity CFDs; override per symbol below if yours differ
 # Instruments whose CFD trades in extended hours. For the rest the platform holds the
 # regular close until its own session opens, so valuing them at a pre-market price would
 # invent movement the account does not have.
-EXTENDED_HOURS = {"MU"}
+EXTENDED_HOURS = {"MU", "NKE"}
 
 SPREADS = {
     "GPRO": 0.0230,   # 1.29 / 1.32
     "KOD": 0.0015,    # 91.04 / 91.18
     "MU": 0.0029,     # 1060.96 / 1063.99
+    "NKE": 0.0021,    # 33.88 / 33.95
 }
 
 
