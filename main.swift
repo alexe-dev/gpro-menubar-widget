@@ -101,14 +101,16 @@ struct Position {
     let avgPrice: Double
     let currency: String
     let leverage: Double
-    let spread: Double        // platform bid/ask width, in instrument currency
+    let spreadPct: Double     // platform bid/ask width as a fraction of price
     let lots: Int
 
     var sign: Double { direction.lowercased() == "sell" ? -1 : 1 }
 
-    /// A long is closed at the bid and margined at the ask; Yahoo's last trade sits near the mid.
-    func closingPrice(from last: Double) -> Double { last - sign * spread / 2 }
-    func marginPrice(from last: Double) -> Double { last + sign * spread / 2 }
+    /// A long is closed at the bid and margined at the ask; Yahoo's last trade sits near the
+    /// mid. The width is relative because the platform's spread moves with the quote.
+    private func halfSpread(_ last: Double) -> Double { last * spreadPct / 2 }
+    func closingPrice(from last: Double) -> Double { last - sign * halfSpread(last) }
+    func marginPrice(from last: Double) -> Double { last + sign * halfSpread(last) }
 }
 
 /// Positions exported from Trading 212 (tools/t212-positions.py), plus the cash the
@@ -156,7 +158,7 @@ struct Portfolio {
                 avgPrice: avgPrice,
                 currency: entry["currency"] as? String ?? "USD",
                 leverage: entry["leverage"] as? Double ?? 5,
-                spread: entry["spread"] as? Double ?? 0,
+                spreadPct: entry["spreadPct"] as? Double ?? 0,
                 lots: entry["lots"] as? Int ?? 1)
         }
         guard !positions.isEmpty else { return nil }
@@ -1101,7 +1103,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let price = priceCache[position.symbol],
                       let fx = rate(from: position.currency) else { continue }
                 let closing = targets[position.symbol] ?? position.closingPrice(from: price)
-                let marginPrice = targets[position.symbol].map { $0 + position.sign * position.spread }
+                // A target is the price a position closes at, so the other side of the
+                // spread sits a full width above it.
+                let marginPrice = targets[position.symbol].map { $0 * (1 + position.sign * position.spreadPct) }
                     ?? position.marginPrice(from: price)
                 let pnl = position.sign * position.units * (closing - position.avgPrice) * fx
                 let result = pnl - fxFeeRate * abs(pnl)

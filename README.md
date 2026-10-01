@@ -115,7 +115,7 @@ Overnight interest is not part of the result — it is charged to cash daily, an
 
 The two-branch health formula is Trading 212's [account margin status](https://helpcentre.trading212.com/hc/en-us/articles/360007119457-What-does-my-account-margin-status-show); both branches meet at 50%. A margin call email goes out at 45% and positions start closing at 25%.
 
-Spreads matter more than they look: Trading 212 values a long at the bid while Yahoo reports the last trade, near the mid. On 52,000 GPRO units a 0.03 spread is ~17,000 CZK of result. Put the spreads you see on the instrument pages into `SPREADS` in `tools/t212-positions.py`.
+Spreads matter more than they look: Trading 212 values a long at the bid while Yahoo reports the last trade, near the mid. On 52,000 GPRO units a 0.03 spread is ~17,000 CZK of result. They are held as a fraction of price — the platform widens and narrows them with the quote, so an absolute figure drifts out of date. Read SELL/BUY off the instrument page, divide the difference by the mid, and put it into `SPREADS` in `tools/t212-positions.py`.
 
 Cash is the one input an export cannot keep current, so it is re-pinned automatically: whenever a live reading arrives from the browser extension, cash is set to that equity minus the unrealised P/L computed at the same moment. Between market sessions the widget carries that cash forward and only the prices move.
 

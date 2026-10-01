@@ -12,14 +12,15 @@ data class Position(
     val avgPrice: Double,
     val currency: String,
     val leverage: Double,
-    val spread: Double,
+    val spreadPct: Double,
     val lots: Int,
 ) {
     val sign: Double get() = if (direction.equals("Sell", true)) -1.0 else 1.0
 
-    /** A long closes at the bid and is margined at the ask; Yahoo's last trade is near the mid. */
-    fun closing(last: Double) = last - sign * spread / 2
-    fun marginPrice(last: Double) = last + sign * spread / 2
+    /** A long closes at the bid and is margined at the ask; Yahoo's last trade is near the
+     *  mid. The width is relative: the platform's spread moves with the quote. */
+    fun closing(last: Double) = last - sign * last * spreadPct / 2
+    fun marginPrice(last: Double) = last + sign * last * spreadPct / 2
 }
 
 data class Sync(
@@ -99,7 +100,7 @@ object Api {
                     avgPrice = item.getDouble("avgPrice"),
                     currency = item.optString("currency", "USD"),
                     leverage = item.optDouble("leverage", 5.0),
-                    spread = item.optDouble("spread", 0.0),
+                    spreadPct = item.optDouble("spreadPct", 0.0),
                     lots = item.optInt("lots", 1),
                 )
             }
@@ -189,7 +190,8 @@ object Calculator {
 
             val target = targets[position.symbol]
             val closing = target ?: position.closing(last)
-            val marginPrice = target?.plus(position.sign * position.spread) ?: position.marginPrice(last)
+            val marginPrice = target?.times(1 + position.sign * position.spreadPct)
+                ?: position.marginPrice(last)
 
             val pnl = position.sign * position.units * (closing - position.avgPrice) * rate
             val positionResult = pnl - FX_FEE * Math.abs(pnl)
