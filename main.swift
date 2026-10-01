@@ -46,6 +46,19 @@ var withdrawalsTotal: Double {
 
 var netDeposits: Double { depositsTotal - withdrawalsTotal }
 
+/// Optional third symbol: empty means the block is not shown at all.
+var symbol3: String {
+    get { UserDefaults.standard.string(forKey: "ticker3") ?? "" }
+    set { UserDefaults.standard.set(newValue.uppercased(), forKey: "ticker3") }
+}
+
+/// Deriving the account from the export and Yahoo prices is opt-in. By default the widget
+/// only reports what the open Trading 212 tab tells it.
+var computeFromExport: Bool {
+    get { UserDefaults.standard.bool(forKey: "computeFromExport") }
+    set { UserDefaults.standard.set(newValue, forKey: "computeFromExport") }
+}
+
 let fxFeeRate = 0.005   // Trading 212 charges 0.5% of the result as an FX fee
 let refreshInterval: TimeInterval = Double(ProcessInfo.processInfo.environment["REFRESH"] ?? "") ?? 5
 
@@ -297,6 +310,9 @@ let strings: [String: (String, String)] = [
     "language": ("Язык", "Language"),
     "symbol": ("Тикер: %@", "Symbol: %@"),
     "symbol2": ("Второй тикер: %@", "Second symbol: %@"),
+    "symbol3": ("Третий тикер: %@", "Third symbol: %@"),
+    "none": ("—", "—"),
+    "computeToggle": ("Считать счёт по ценам Yahoo", "Compute account from Yahoo prices"),
     "showPercent": ("Проценты в меню-баре", "Percentages in the menu bar"),
     "changeSymbol": ("Смена тикера", "Change symbol"),
     "changeSymbolInfo": ("Любой символ Yahoo Finance, например AAPL или BTC-USD.",
@@ -380,6 +396,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var newsItems: [NSMenuItem] = []
     let newsCount = 1   // one headline per symbol, the latest
     let newsHeader2 = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let newsHeader3 = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    var newsItems3: [NSMenuItem] = []
     var newsItems2: [NSMenuItem] = []
     let languageItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var symbolItem = NSMenuItem()
@@ -405,6 +423,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let balancePort: UInt16 = UInt16(ProcessInfo.processInfo.environment["BALANCE_PORT"] ?? "") ?? 47632
     var lastQuote: Quote?
     var lastQuote2: Quote?
+    var lastQuote3: Quote?
+    var symbolItem3 = NSMenuItem()
+    var computeItem = NSMenuItem()
     var symbolItem2 = NSMenuItem()
     var percentItem = NSMenuItem()
     var refreshItem = NSMenuItem()
@@ -416,9 +437,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for slot in 0..<2 {
-            let price = NSMenuItem(title: "", action: slot == 0 ? #selector(openWeb) : #selector(openWeb2),
-                                   keyEquivalent: "")
+        for slot in 0..<3 {
+            let action: Selector = slot == 0 ? #selector(openWeb)
+                : slot == 1 ? #selector(openWeb2) : #selector(openWeb3)
+            let price = NSMenuItem(title: "", action: action, keyEquivalent: "")
             price.target = self
             let name = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             let stats = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -429,12 +451,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             quotePriceItems.append(price)
             quoteNameItems.append(name)
             quoteStatsItems.append(stats)
-            if slot == 0 { menu.addItem(.separator()) }
+            if slot < 2 { menu.addItem(.separator()) }
         }
         updatedItem.isEnabled = true
         menu.addItem(updatedItem)
-        quotePriceItems[0].attributedTitle = styled("\(symbol)  \(t("loading"))", size: 13, color: .secondaryLabelColor)
-        quotePriceItems[1].attributedTitle = styled("\(symbol2)  \(t("loading"))", size: 13, color: .secondaryLabelColor)
+        for (slot, ticker) in [symbol, symbol2, symbol3].enumerated() {
+            quotePriceItems[slot].attributedTitle = styled("\(ticker)  \(t("loading"))",
+                                                           size: 13, color: .secondaryLabelColor)
+        }
         menu.addItem(.separator())
         balanceItem.isEnabled = true
         balanceItem.isHidden = true
@@ -468,7 +492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(tpTotalItem)
 
         menu.addItem(.separator())
-        for (header, storage) in [(newsHeader, 0), (newsHeader2, 1)] {
+        for (header, storage) in [(newsHeader, 0), (newsHeader2, 1), (newsHeader3, 2)] {
             header.isEnabled = true
             menu.addItem(header)
             for _ in 0..<newsCount {
@@ -476,10 +500,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 entry.target = self
                 entry.isEnabled = true
                 entry.isHidden = true
-                if storage == 0 { newsItems.append(entry) } else { newsItems2.append(entry) }
+                switch storage {
+                case 0: newsItems.append(entry)
+                case 1: newsItems2.append(entry)
+                default: newsItems3.append(entry)
+                }
                 menu.addItem(entry)
             }
-            if storage == 0 { menu.addItem(.separator()) }
+            if storage < 2 { menu.addItem(.separator()) }
         }
         menu.addItem(.separator())
         symbolItem = NSMenuItem(title: "", action: #selector(changeSymbol), keyEquivalent: "s")
@@ -488,6 +516,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         symbolItem2 = NSMenuItem(title: "", action: #selector(changeSymbol2), keyEquivalent: "d")
         symbolItem2.target = self
         menu.addItem(symbolItem2)
+        symbolItem3 = NSMenuItem(title: "", action: #selector(changeSymbol3), keyEquivalent: "3")
+        symbolItem3.target = self
+        menu.addItem(symbolItem3)
+        computeItem = NSMenuItem(title: "", action: #selector(toggleCompute), keyEquivalent: "y")
+        computeItem.target = self
+        computeItem.state = computeFromExport ? .on : .off
+        menu.addItem(computeItem)
         dashboardItem = NSMenuItem(title: "", action: #selector(showDashboard), keyEquivalent: "0")
         dashboardItem.target = self
         menu.addItem(dashboardItem)
@@ -575,8 +610,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applyLanguage() {
         newsHeader.attributedTitle = newsTitle(symbol)
         newsHeader2.attributedTitle = newsTitle(symbol2)
+        newsHeader3.attributedTitle = newsTitle(symbol3)
         symbolItem.title = String(format: t("symbol"), symbol)
         symbolItem2.title = String(format: t("symbol2"), symbol2)
+        symbolItem3.title = String(format: t("symbol3"), symbol3.isEmpty ? t("none") : symbol3)
+        computeItem.title = t("computeToggle")
         percentItem.title = t("showPercent")
         tpMenuItem.title = t("tp")
         depositsItem.title = t("setDeposits")
@@ -704,6 +742,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var quotes: [(String, Quote)] = []
         if let q = lastQuote { quotes.append((symbol, q)) }
         if let q = lastQuote2 { quotes.append((symbol2, q)) }
+        if let q = lastQuote3, !symbol3.isEmpty { quotes.append((symbol3, q)) }
         DashboardModel.shared.push(quotes: quotes, computed: computed, balance: balance, portfolio: portfolio)
     }
 
@@ -711,6 +750,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyLanguage()
         lastQuote = nil
         lastQuote2 = nil
+        lastQuote3 = nil
         priceCache.removeAll()
         dashboardWindow?.title = "\(symbol) · \(symbol2)"
         refresh()
@@ -802,6 +842,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if lastQuote != nil { render(lastQuote) }
     }
 
+    @objc func openWeb3() {
+        guard !symbol3.isEmpty else { return }
+        NSWorkspace.shared.open(URL(string: "https://finance.yahoo.com/quote/\(symbol3)")!)
+    }
+
+    @objc func toggleCompute() {
+        computeFromExport.toggle()
+        computeItem.state = computeFromExport ? .on : .off
+        if computeFromExport {
+            refreshPortfolio()
+        } else {
+            computed = nil
+            renderBalance(nil)
+            if lastQuote != nil { render(lastQuote) }
+        }
+    }
+
+    @objc func changeSymbol3() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = t("changeSymbol")
+        alert.informativeText = t("changeSymbolInfo")
+        alert.addButton(withTitle: t("ok"))
+        alert.addButton(withTitle: t("cancel"))
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        field.stringValue = symbol3
+        field.placeholderString = t("none")
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let entered = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard entered != symbol3 else { return }
+
+        // An empty field simply drops the third block.
+        if entered.isEmpty {
+            symbol3 = ""
+            lastQuote3 = nil
+            applyLanguage()
+            renderThird(nil)
+            return
+        }
+
+        let previous = symbol3
+        symbol3 = entered
+        lastQuote3 = nil
+        applyLanguage()
+        fetch(entered) { [weak self] quote in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let quote = quote {
+                    self.renderThird(quote)
+                    self.refreshNews()
+                } else {
+                    symbol3 = previous
+                    self.applyLanguage()
+                    let warning = NSAlert()
+                    warning.messageText = String(format: self.t("unknownSymbol"), previous.isEmpty ? self.t("none") : previous)
+                    warning.runModal()
+                }
+            }
+        }
+    }
+
     @objc func openWeb2() {
         NSWorkspace.shared.open(URL(string: "https://finance.yahoo.com/quote/\(symbol2)")!)
     }
@@ -826,6 +931,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func refreshNews() {
         loadNews(for: symbol) { [weak self] items in self?.renderNews(items, into: self?.newsItems ?? [], header: self?.newsHeader) }
         loadNews(for: symbol2) { [weak self] items in self?.renderNews(items, into: self?.newsItems2 ?? [], header: self?.newsHeader2) }
+        if !symbol3.isEmpty {
+            loadNews(for: symbol3) { [weak self] items in self?.renderNews(items, into: self?.newsItems3 ?? [], header: self?.newsHeader3) }
+        }
     }
 
     func loadNews(for ticker: String, _ completion: @escaping ([NewsItem]) -> Void) {
@@ -878,6 +986,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // The secondary symbol gets a compact block: price with change, then its ranges.
     // The base marker stays with the primary one; news is shown for both.
+    func renderThird(_ quote: Quote?) {
+        let visible = !symbol3.isEmpty
+        [quotePriceItems, quoteNameItems, quoteStatsItems].forEach { items in
+            if items.count > 2 { items[2].isHidden = !visible }
+        }
+        newsHeader3.isHidden = !visible
+        newsItems3.forEach { $0.isHidden = !visible }
+        guard visible, let q = quote ?? lastQuote3 else { return }
+        lastQuote3 = q
+        renderQuoteBlock(ticker: symbol3, quote: q, slot: 2)
+        pushDashboard()
+        if lastQuote != nil { render(lastQuote) }
+    }
+
     func renderSecondary(_ quote: Quote?) {
         guard let q = quote ?? lastQuote2 else { return }
         lastQuote2 = q
@@ -889,7 +1011,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Prices for every position symbol, not just the two on display, plus the FX rates
     // that carry instrument currency into account currency.
     func refreshPortfolio() {
-        guard let portfolio = portfolio else { return }
+        guard computeFromExport, let portfolio = portfolio else { return }
 
         let symbols = Set(portfolio.positions.map(\.symbol))
         let pairs = Set(portfolio.positions.map(\.currency))
@@ -921,7 +1043,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func recompute() {
-        guard let portfolio = portfolio else { return }
+        guard computeFromExport, let portfolio = portfolio else { return }
 
         let cashNow = UserDefaults.standard.object(forKey: "cashCalibrated") as? Double ?? portfolio.cashFallback
         var unrealized = 0.0, notional = 0.0, margin = 0.0, priced = 0
@@ -1024,7 +1146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 && lastQuote?.session == .regular
         } ?? false
 
-        guard let computed = computed, !platformLive else {
+        guard computeFromExport, let computed = computed, !platformLive else {
             renderScrapedOnly()
             return
         }
@@ -1200,7 +1322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detail.append(styled(parts.joined(separator: "     ·     "),
                              size: 12, weight: .medium, color: .secondaryLabelColor, mono: true))
         var note = t("platform") + " · " + relative(account.received)
-        if computed == nil { note += " · " + t("noPositions") }
+        if computeFromExport && computed == nil { note += " · " + t("noPositions") }
         if account.hidden { note += " · " + t("background") }
         detail.append(styled("   " + note, size: 10,
                              color: computed == nil ? .systemOrange : .tertiaryLabelColor))
@@ -1273,6 +1395,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fetch(symbol2) { [weak self] quote in
             DispatchQueue.main.async { self?.renderSecondary(quote) }
         }
+        if !symbol3.isEmpty {
+            fetch(symbol3) { [weak self] quote in
+                DispatchQueue.main.async { self?.renderThird(quote) }
+            }
+        }
     }
 
     // macOS dims disabled menu items on top of any color, so we style attributedTitle ourselves.
@@ -1333,10 +1460,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // market hours. Which price is which is settled by the order, same as in the menu.
         let title = NSMutableAttributedString()
         title.append(quoteSegment(q, accent: accent, arrow: arrow))
-        if let second = lastQuote2 {
-            let up2 = second.changePercent >= 0
+        for extra in [lastQuote2, lastQuote3].compactMap({ $0 }) {
+            let rising = extra.changePercent >= 0
             title.append(NSAttributedString(string: "   "))
-            title.append(quoteSegment(second, accent: accentColor(up: up2), arrow: up2 ? "▲" : "▼"))
+            title.append(quoteSegment(extra, accent: accentColor(up: rising), arrow: rising ? "▲" : "▼"))
         }
         let mark = sessionIcon(q.session)
         title.append(NSAttributedString(string: "  "))

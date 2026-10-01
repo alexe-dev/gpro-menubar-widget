@@ -37,7 +37,7 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/local.gpro.widget.plist
 
 ## Configuration
 
-**Symbols** — two are tracked at once. Pick them from the menu (`Symbol: GPRO` ⌘S, `Second symbol: KOD` ⌘D) and type any Yahoo Finance ticker such as `AAPL` or `BTC-USD`. Both choices are remembered; if a ticker does not resolve, the previous one is kept. Defaults are `GPRO` and `KOD`.
+**Symbols** — up to three are tracked at once. Pick them from the menu (`Symbol` ⌘S, `Second symbol` ⌘D, `Third symbol` ⌘3) and type any Yahoo Finance ticker such as `AAPL` or `BTC-USD`. The choices are remembered; if a ticker does not resolve, the previous one is kept. Defaults are `GPRO` and `KOD`; the third is empty and its block stays hidden until set.
 
 The menu bar shows both quotes in order, primary first. The dropdown gives the primary symbol the full treatment — base marker, ranges, news — and the secondary one a compact block with its price, change, name and ranges. Clicking that block opens it on Yahoo Finance. Each symbol carries its latest headline.
 
@@ -79,6 +79,8 @@ The `extension/` folder holds a Chrome extension that reads the CFD account summ
 Nothing is scraped by the widget itself and nothing leaves the machine — see `extension/README.md`.
 
 ## Computed account figures
+
+**Off by default** — the widget reports what the open Trading 212 tab tells it, nothing more. Turn the calculation on with `Compute account from Yahoo prices` in the menu (⌘Y) or the settings window; it needs `positions.json`.
 
 Trading 212's CFD platform only updates while its own session is open — after the close its balance, margin and health freeze until the next morning. The widget therefore computes them itself from Yahoo prices, which keep running through pre-market, after-hours and overnight.
 

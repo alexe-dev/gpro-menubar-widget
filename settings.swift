@@ -8,6 +8,8 @@ struct SettingsView: View {
 
     @State private var primary = symbol
     @State private var secondary = symbol2
+    @State private var third = symbol3
+    @State private var computeAccount = computeFromExport
     @State private var deposits = String(format: "%.2f", depositsTotal)
     @State private var withdrawals = String(format: "%.2f", withdrawalsTotal)
     @State private var targets: [String: String] = takeProfit.mapValues { String(format: "%g", $0) }
@@ -27,6 +29,13 @@ struct SettingsView: View {
                     section("Symbols") {
                         labelled("Primary") { TextField("GPRO", text: $primary).textFieldStyle(.roundedBorder) }
                         labelled("Secondary") { TextField("KOD", text: $secondary).textFieldStyle(.roundedBorder) }
+                        labelled("Third") { TextField("optional", text: $third).textFieldStyle(.roundedBorder) }
+                    }
+
+                    section("Account") {
+                        Toggle("Compute from Yahoo prices", isOn: $computeAccount)
+                        Text("Off: only what the open Trading 212 tab reports. On: positions.json and live quotes, so the figures keep moving outside the session.")
+                            .font(.system(size: 10)).foregroundStyle(.tertiary)
                     }
 
                     section("Take profit") {
@@ -110,6 +119,8 @@ struct SettingsView: View {
         let newSecondary = secondary.trimmingCharacters(in: .whitespaces).uppercased()
         if !newPrimary.isEmpty { symbol = newPrimary }
         if !newSecondary.isEmpty { symbol2 = newSecondary }
+        symbol3 = third.trimmingCharacters(in: .whitespaces).uppercased()
+        computeFromExport = computeAccount
 
         depositsTotal = number(deposits).map(abs) ?? 0
         withdrawalsTotal = number(withdrawals).map(abs) ?? 0
