@@ -33,13 +33,32 @@ SPREADS = {
 }
 
 
+def identity(row):
+    """A stable key per record, since exports differ in their column set.
+
+    Comparing whole rows looked sufficient until two exports of the same day disagreed
+    on one column, and every shared order was counted twice.
+    """
+    kind = row["Record Type"]
+    if kind == "Order":
+        return ("order", row["Order ID"])
+    if kind == "Closed position":
+        return ("closed", row["Position ID"], row["Order ID"])
+    if kind == "Transaction":
+        return ("transaction", row.get("Transaction ID", ""))
+    if kind == "Interest on cash":
+        return ("cash interest", row.get("Cash interest ID", ""), row["Date (UTC)"])
+    # Overnight interest carries no id of its own.
+    return (kind, row["Date (UTC)"], row["Position ID"], row["Amount (account currency)"])
+
+
 def parse(paths):
-    # Exports overlap at their boundaries, so identical rows are collapsed.
+    # Exports overlap at their boundaries, so the same record is collapsed to one.
     seen = set()
     rows = []
     for path in paths:
         for row in csv.DictReader(open(path)):
-            key = tuple(row.items())
+            key = identity(row)
             if key in seen:
                 continue
             seen.add(key)
