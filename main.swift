@@ -63,7 +63,7 @@ var computeFromExport: Bool {
 /// so each one can be dropped on its own.
 enum TitlePart: String, CaseIterable {
     case first = "showFirst", second = "showSecond", third = "showThird"
-    case health = "showHealth", total = "showTotal"
+    case session = "showSession", health = "showHealth", total = "showTotal"
 
     var isOn: Bool {
         get { UserDefaults.standard.object(forKey: rawValue) as? Bool ?? true }
@@ -1481,10 +1481,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if title.length > 0 { title.append(NSAttributedString(string: "   ")) }
             title.append(quoteSegment(quote, accent: accentColor(up: rising), arrow: rising ? "▲" : "▼"))
         }
-        // The session mark belongs to the quotes; without them it has nothing to qualify.
-        if TitlePart.first.isOn || TitlePart.second.isOn || TitlePart.third.isOn {
+        if TitlePart.session.isOn {
             let mark = sessionIcon(q.session)
-            title.append(NSAttributedString(string: "  "))
+            if title.length > 0 { title.append(NSAttributedString(string: "  ")) }
             title.append(icon(mark.symbol, color: mark.color, size: 10))
         }
         // The account total rides along after the session mark: same weight as the price
