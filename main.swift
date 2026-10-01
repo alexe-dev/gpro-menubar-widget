@@ -340,6 +340,7 @@ let strings: [String: (String, String)] = [
     "lots": ("поз.", "pos."),
     "tp": ("Цели (TP)", "Targets (TP)"),
     "dashboard": ("Окно счёта", "Dashboard"),
+    "settings": ("Настройки…", "Settings…"),
     "tpSetTitle": ("Цены целей", "Target prices"),
     "tpSetInfo": ("Цена закрытия позиции: для лонга это bid. Пусто — без цели.",
                   "The price a position closes at — the bid for a long. Empty means no target."),
@@ -430,6 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var tpMenuItem = NSMenuItem()
     var depositsItem = NSMenuItem()
     var dashboardItem = NSMenuItem()
+    var settingsItem = NSMenuItem()
     var dashboardWindow: NSWindow?
     let lifetimeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let balancePort: UInt16 = UInt16(ProcessInfo.processInfo.environment["BALANCE_PORT"] ?? "") ?? 47632
@@ -538,6 +540,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dashboardItem = NSMenuItem(title: "", action: #selector(showDashboard), keyEquivalent: "0")
         dashboardItem.target = self
         menu.addItem(dashboardItem)
+        settingsItem = NSMenuItem(title: "", action: #selector(showSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
         depositsItem = NSMenuItem(title: "", action: #selector(editDeposits), keyEquivalent: "n")
         depositsItem.target = self
         menu.addItem(depositsItem)
@@ -631,6 +636,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tpMenuItem.title = t("tp")
         depositsItem.title = t("setDeposits")
         dashboardItem.title = t("dashboard")
+        settingsItem.title = t("settings")
         refreshItem.title = t("refresh")
         webItem.title = t("openWeb")
         languageItem.title = t("language")
@@ -748,6 +754,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         pushDashboard()
+    }
+
+    @objc func showSettings() {
+        showDashboard()
+        DashboardModel.shared.openSettings = true
     }
 
     func pushDashboard() {

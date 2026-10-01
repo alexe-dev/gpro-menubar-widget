@@ -11,6 +11,8 @@ final class DashboardModel: ObservableObject {
     @Published var positions: [Position] = []
     @Published var accountCurrency = "CZK"
     @Published var updated = Date()
+    /// Set from the menu so ⌘, lands straight on the settings sheet.
+    @Published var openSettings = false
 
     func push(quotes: [(String, Quote)], computed: Computed?, balance: Balance?, portfolio: Portfolio?) {
         self.quotes = quotes.map { (ticker: $0.0, quote: $0.1) }
@@ -115,6 +117,7 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                header
                 hero
                 quotes
                 if let computed = model.computed, !computed.holdings.isEmpty { positions(computed) }
@@ -124,13 +127,35 @@ struct DashboardView: View {
         }
         .frame(minWidth: 560, minHeight: 500)
         .background(.background)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { showSettings = true } label: { Image(systemName: "slider.horizontal.3") }
-                    .help("Settings")
+        .sheet(isPresented: $showSettings) { SettingsView() }
+        .onChange(of: model.openSettings) { _, requested in
+            if requested {
+                showSettings = true
+                model.openSettings = false
             }
         }
-        .sheet(isPresented: $showSettings) { SettingsView() }
+    }
+
+    // The settings button lives in the content: this window is plain AppKit, so a
+    // SwiftUI toolbar would have nowhere to attach itself.
+    private var header: some View {
+        HStack {
+            Text(model.quotes.map(\.ticker).joined(separator: " · "))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+                    .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 7))
+            }
+            .buttonStyle(.plain)
+            .help("Settings")
+        }
     }
 
     // The account, with nothing but the figures that change a decision.
