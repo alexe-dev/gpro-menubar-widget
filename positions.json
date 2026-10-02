@@ -1,7 +1,7 @@
 {
-  "generated": "2026-10-02T00:02:39+03:00",
+  "generated": "2026-10-02T12:43:02+03:00",
   "accountCurrency": "CZK",
-  "cashFallback": 3900413.31,
+  "cashFallback": 3744562.59,
   "positions": [
     {
       "symbol": "GPRO",
@@ -15,15 +15,15 @@
       "lots": 18
     },
     {
-      "symbol": "NKE",
+      "symbol": "MU",
       "direction": "Buy",
-      "units": 2748.9999,
-      "avgPrice": 33.984271,
+      "units": 234.9871,
+      "avgPrice": 1107.350793,
       "currency": "USD",
       "leverage": 5.0,
-      "spreadPct": 0.0021,
+      "spreadPct": 0.0029,
       "extendedHours": true,
-      "lots": 4
+      "lots": 11
     }
   ]
 }
