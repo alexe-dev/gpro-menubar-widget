@@ -8,3 +8,5 @@ android/build/
 android/app/build/
 android/local.properties
 .gist-id
+positions.json
+__pycache__/
