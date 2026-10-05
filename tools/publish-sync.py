@@ -51,8 +51,12 @@ def publish(data):
     tmp.write_text(body + "\n")
 
     try:
-        if GIST_ID_PATH.exists():
-            gist_id = GIST_ID_PATH.read_text().strip()
+        # A gist that has been deleted — after a leak, say — must not stop the publish.
+        existing = GIST_ID_PATH.read_text().strip() if GIST_ID_PATH.exists() else ""
+        alive = existing and subprocess.run(["gh", "api", f"gists/{existing}"],
+                                            capture_output=True).returncode == 0
+        if alive:
+            gist_id = existing
             subprocess.run(["gh", "gist", "edit", gist_id, "-f", GIST_FILE, str(tmp)], check=True)
         else:
             out = subprocess.run(
